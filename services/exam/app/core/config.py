@@ -15,6 +15,10 @@ class Settings(BaseSettings):
     access_token_ttl_seconds: int = 900  # 15 minutes
     refresh_token_ttl_seconds: int = 604_800  # 7 days
 
+    # Question service (HTTP only — no code imports). Host default reaches the
+    # compose-mapped port; inside the compose network it is http://question:8000.
+    question_service_url: str = "http://localhost:8002"
+
 
 @lru_cache
 def get_settings() -> Settings:

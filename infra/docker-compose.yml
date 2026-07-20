@@ -47,6 +47,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-dsa}:${POSTGRES_PASSWORD:-dsa}@postgres:5432/${POSTGRES_DB:-exam}
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-change-me-not-for-production-use}
+      QUESTION_SERVICE_URL: http://question:8000
     command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
     ports:
       - "8001:8000"

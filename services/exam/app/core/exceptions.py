@@ -41,3 +41,13 @@ class EmailTaken(DomainError):
 class NotFound(DomainError):
     status_code = 404
     detail = "Resource not found"
+
+
+class InsufficientQuestionPool(DomainError):
+    status_code = 409
+    detail = "Not enough published questions to satisfy the blueprint"
+
+
+class UpstreamServiceError(DomainError):
+    status_code = 502
+    detail = "Question service is unavailable"
