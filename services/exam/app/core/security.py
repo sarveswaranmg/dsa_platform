@@ -10,10 +10,12 @@ from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError
 
 from app.core.config import get_settings
-from app.core.exceptions import TokenInvalid
+from app.core.exceptions import InviteInvalid, TokenInvalid
 from app.models.examiner import Role
 
 TOKEN_TYPE_EXAMINER_ACCESS = "examiner_access"
+TOKEN_TYPE_CANDIDATE_INVITE = "candidate_invite"
+TOKEN_TYPE_CANDIDATE_EXAM = "candidate_exam"
 TOTP_ISSUER = "DSA Exam Platform"
 
 _password_hasher = PasswordHasher()
@@ -64,6 +66,95 @@ def decode_access_token(token: str) -> dict[str, Any]:
     except jwt.PyJWTError as exc:
         raise TokenInvalid() from exc
     if payload["type"] != TOKEN_TYPE_EXAMINER_ACCESS:
+        raise TokenInvalid()
+    return payload
+
+
+def create_invite_token(
+    *,
+    jti: str,
+    invite_id: uuid.UUID,
+    exam_id: uuid.UUID,
+    org_id: uuid.UUID,
+    candidate_email: str,
+    not_before: datetime,
+    expires_at: datetime,
+) -> str:
+    settings = get_settings()
+    payload = {
+        "jti": jti,
+        "invite_id": str(invite_id),
+        "exam_id": str(exam_id),
+        "org_id": str(org_id),
+        "candidate_email": candidate_email,
+        "type": TOKEN_TYPE_CANDIDATE_INVITE,
+        "nbf": not_before,
+        "iat": not_before,
+        "exp": expires_at,
+    }
+    return jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
+
+
+def decode_invite_token(token: str) -> dict[str, Any]:
+    """Validate signature + window. Single-use is enforced separately against
+    Redis. Any failure raises InviteInvalid (opaque — no reason leaked)."""
+    settings = get_settings()
+    try:
+        payload: dict[str, Any] = jwt.decode(
+            token,
+            settings.jwt_secret,
+            algorithms=["HS256"],
+            options={
+                "require": ["jti", "invite_id", "exam_id", "org_id", "type", "exp"]
+            },
+        )
+    except jwt.PyJWTError as exc:
+        raise InviteInvalid() from exc
+    if payload["type"] != TOKEN_TYPE_CANDIDATE_INVITE:
+        raise InviteInvalid()
+    return payload
+
+
+def create_candidate_exam_token(
+    *,
+    invite_id: uuid.UUID,
+    org_id: uuid.UUID,
+    exam_id: uuid.UUID,
+    blueprint_version_id: uuid.UUID,
+    candidate_email: str,
+    not_before: datetime,
+    expires_at: datetime,
+) -> str:
+    settings = get_settings()
+    payload = {
+        "sub": str(invite_id),
+        "org_id": str(org_id),
+        "exam_id": str(exam_id),
+        "blueprint_version_id": str(blueprint_version_id),
+        "candidate_email": candidate_email,
+        "type": TOKEN_TYPE_CANDIDATE_EXAM,
+        "jti": str(uuid.uuid4()),
+        "nbf": not_before,
+        "iat": datetime.now(UTC),
+        "exp": expires_at,
+    }
+    return jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
+
+
+def decode_candidate_exam_token(token: str) -> dict[str, Any]:
+    settings = get_settings()
+    try:
+        payload: dict[str, Any] = jwt.decode(
+            token,
+            settings.jwt_secret,
+            algorithms=["HS256"],
+            options={
+                "require": ["sub", "org_id", "exam_id", "type", "exp"]
+            },
+        )
+    except jwt.PyJWTError as exc:
+        raise TokenInvalid() from exc
+    if payload["type"] != TOKEN_TYPE_CANDIDATE_EXAM:
         raise TokenInvalid()
     return payload
 

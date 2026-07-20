@@ -16,6 +16,8 @@ dependencies = [
     "pyjwt>=2.9",
     "uuid6>=2024.1.12",
     "httpx>=0.27",
+    "redis>=5",
+    "joserfc>=1.0",
 ]
 
 [dependency-groups]

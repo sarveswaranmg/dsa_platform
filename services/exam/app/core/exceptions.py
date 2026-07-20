@@ -48,6 +48,33 @@ class InsufficientQuestionPool(DomainError):
     detail = "Not enough published questions to satisfy the blueprint"
 
 
+class InvalidWindow(DomainError):
+    status_code = 422
+    detail = "Invalid exam time window"
+
+
+class InviteInvalid(DomainError):
+    # One opaque status for tampered / expired / reused so probing an invite
+    # can't distinguish why it failed.
+    status_code = 401
+    detail = "Invite is invalid, expired, or already used"
+
+
+class EmailMismatch(DomainError):
+    status_code = 403
+    detail = "Authenticated email does not match the invited email"
+
+
+class EmailNotVerified(DomainError):
+    status_code = 403
+    detail = "Google account email is not verified"
+
+
+class OIDCError(DomainError):
+    status_code = 401
+    detail = "Google authentication failed"
+
+
 class UpstreamServiceError(DomainError):
     status_code = 502
     detail = "Question service is unavailable"

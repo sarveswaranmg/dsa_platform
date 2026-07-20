@@ -19,6 +19,12 @@ class Settings(BaseSettings):
     # compose-mapped port; inside the compose network it is http://question:8000.
     question_service_url: str = "http://localhost:8002"
 
+    # Candidate invite flow.
+    google_client_id: str = "dev-google-client-id.apps.googleusercontent.com"
+    google_client_secret: str = "dev-google-client-secret"
+    frontend_base_url: str = "http://localhost:5173"
+    email_backend: str = "console"  # console | (ses later)
+
 
 @lru_cache
 def get_settings() -> Settings:

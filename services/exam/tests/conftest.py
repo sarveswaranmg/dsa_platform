@@ -6,16 +6,20 @@ import pyotp
 import pytest
 from alembic.config import Config
 from httpx import ASGITransport, AsyncClient
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from alembic import command
 from app.clients.question_service import QuestionRef, get_question_client
 from app.core.config import get_settings
+from app.core.redis import get_redis
 from app.core.security import create_access_token
 from app.db.session import get_db
 from app.main import create_app
 from app.models.examiner import Role
+from app.notifications.email import EmailMessage, get_email_sender
+from app.oidc.google import VerifiedIdentity, get_oidc_verifier
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
 
@@ -142,9 +146,59 @@ def fake_question_client() -> FakeQuestionClient:
     return FakeQuestionClient()
 
 
+class FakeEmailSender:
+    def __init__(self) -> None:
+        self.sent: list[EmailMessage] = []
+
+    async def send(self, message: EmailMessage) -> None:
+        self.sent.append(message)
+
+
+class FakeGoogleVerifier:
+    """Injectable OIDC verifier: tests set the identity it returns or an error
+    it raises, so every candidate-auth path is exercised without Google."""
+
+    def __init__(self) -> None:
+        self.identity = VerifiedIdentity(email="candidate@example.com", email_verified=True)
+        self.error: Exception | None = None
+
+    async def verify(self, id_token: str) -> VerifiedIdentity:
+        if self.error is not None:
+            raise self.error
+        return self.identity
+
+
+@pytest.fixture
+def fake_email_sender() -> FakeEmailSender:
+    return FakeEmailSender()
+
+
+@pytest.fixture
+def fake_oidc_verifier() -> FakeGoogleVerifier:
+    return FakeGoogleVerifier()
+
+
+@pytest.fixture
+async def redis_client() -> AsyncIterator[Redis]:
+    # Real Redis (up under `make test`) on a throwaway DB index, flushed
+    # around each test so single-use state never leaks between tests.
+    url = get_settings().redis_url.rsplit("/", 1)[0] + "/15"
+    client = Redis.from_url(url, decode_responses=True)
+    await client.flushdb()
+    try:
+        yield client
+    finally:
+        await client.flushdb()
+        await client.aclose()
+
+
 @pytest.fixture
 async def client(
-    db_session: AsyncSession, fake_question_client: FakeQuestionClient
+    db_session: AsyncSession,
+    fake_question_client: FakeQuestionClient,
+    fake_email_sender: FakeEmailSender,
+    fake_oidc_verifier: FakeGoogleVerifier,
+    redis_client: Redis,
 ) -> AsyncIterator[AsyncClient]:
     app = create_app()
 
@@ -153,6 +207,9 @@ async def client(
 
     app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[get_question_client] = lambda: fake_question_client
+    app.dependency_overrides[get_redis] = lambda: redis_client
+    app.dependency_overrides[get_email_sender] = lambda: fake_email_sender
+    app.dependency_overrides[get_oidc_verifier] = lambda: fake_oidc_verifier
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as http_client:
         yield http_client
