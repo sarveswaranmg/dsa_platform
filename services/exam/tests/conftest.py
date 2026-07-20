@@ -1,6 +1,7 @@
 from collections.abc import AsyncIterator
 from pathlib import Path
 
+import pyotp
 import pytest
 from alembic.config import Config
 from httpx import ASGITransport, AsyncClient
@@ -52,6 +53,65 @@ async def db_session(engine: AsyncEngine) -> AsyncIterator[AsyncSession]:
         finally:
             await session.close()
             await transaction.rollback()
+
+
+@pytest.fixture
+async def auth(client: AsyncClient) -> "AuthHelper":
+    return AuthHelper(client)
+
+
+class AuthHelper:
+    """Drives register → TOTP enrollment → login through the real API."""
+
+    PASSWORD = "correct-horse-battery-staple"
+
+    def __init__(self, client: AsyncClient) -> None:
+        self.client = client
+
+    async def register(self, email: str, org_name: str = "Test Org") -> dict[str, str]:
+        response = await self.client.post(
+            "/auth/register",
+            json={"org_name": org_name, "email": email, "password": self.PASSWORD},
+        )
+        assert response.status_code == 201, response.text
+        data: dict[str, str] = response.json()
+        return data
+
+    async def enroll(self, email: str, totp_secret: str) -> None:
+        response = await self.client.post(
+            "/auth/totp/verify",
+            json={
+                "email": email,
+                "password": self.PASSWORD,
+                "code": pyotp.TOTP(totp_secret).now(),
+            },
+        )
+        assert response.status_code == 204, response.text
+
+    async def login(self, email: str, totp_secret: str) -> dict[str, str]:
+        response = await self.client.post(
+            "/auth/login",
+            json={
+                "email": email,
+                "password": self.PASSWORD,
+                "totp_code": pyotp.TOTP(totp_secret).now(),
+            },
+        )
+        assert response.status_code == 200, response.text
+        data: dict[str, str] = response.json()
+        return data
+
+    async def register_and_login(
+        self, email: str, org_name: str = "Test Org"
+    ) -> tuple[dict[str, str], dict[str, str]]:
+        """Full flow; returns (register_payload, token_payload)."""
+        registration = await self.register(email, org_name)
+        await self.enroll(email, registration["totp_secret"])
+        tokens = await self.login(email, registration["totp_secret"])
+        return registration, tokens
+
+    def bearer(self, tokens: dict[str, str]) -> dict[str, str]:
+        return {"Authorization": f"Bearer {tokens['access_token']}"}
 
 
 @pytest.fixture

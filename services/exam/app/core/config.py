@@ -11,6 +11,10 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     env: str = "dev"
 
+    jwt_secret: str = "dev-jwt-secret-change-me-not-for-production-use"
+    access_token_ttl_seconds: int = 900  # 15 minutes
+    refresh_token_ttl_seconds: int = 604_800  # 7 days
+
 
 @lru_cache
 def get_settings() -> Settings:
