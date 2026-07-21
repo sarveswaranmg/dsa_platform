@@ -68,6 +68,7 @@ def _submission_response(
         exam_id=submission.exam_id,
         question_version_id=submission.question_version_id,
         language=submission.language,
+        mode=submission.mode,
         status=submission.status,
         summary_verdict=submission.summary_verdict,
         compile_error=submission.compile_error,
@@ -152,6 +153,7 @@ async def submit_for_question(
         ordinal=ordinal,
         language=body.language,
         source=body.source,
+        mode=body.mode,
     )
     return _submission_response(submission, [])
 

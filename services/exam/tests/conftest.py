@@ -150,10 +150,24 @@ class FakeQuestionClient:
 
     def set_version(self, content: VersionContent) -> None:
         self.versions[content.version_id] = content
-        # Every published version has one trivial test case so submit works.
+        # One sample case + one hidden case, so run (samples only) and submit
+        # (everything) are distinguishable.
         self.test_case_keys.setdefault(
             content.version_id,
-            [TestCaseKeys(ordinal=1, input_s3_key="in", expected_output_s3_key="out")],
+            [
+                TestCaseKeys(
+                    ordinal=1,
+                    input_s3_key="in1",
+                    expected_output_s3_key="out1",
+                    is_sample=True,
+                ),
+                TestCaseKeys(
+                    ordinal=2,
+                    input_s3_key="in2",
+                    expected_output_s3_key="out2",
+                    is_sample=False,
+                ),
+            ],
         )
 
     async def list_published_questions(

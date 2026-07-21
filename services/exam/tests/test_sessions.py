@@ -1,3 +1,4 @@
+import json
 import uuid
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
@@ -233,6 +234,50 @@ async def test_submit_records_session_and_version(
     assert stored is not None
     assert str(stored.session_id) == started["id"]  # linked to the session
     assert len(captured_jobs.sent) == 1  # enqueued to the judge
+
+
+async def test_run_mode_grades_only_sample_cases(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fake_question_client: FakeQuestionClient,
+    captured_jobs: FakePublisher,
+    org_id: uuid.UUID,
+) -> None:
+    exam = await _setup_exam(db_session, fake_question_client, org_id)
+    headers = _headers(exam)
+    await client.post("/candidate/session/start", headers=headers)
+
+    run = await client.post(
+        "/candidate/session/questions/1/submissions",
+        headers=headers,
+        json={"language": "python", "source": "print(1)\n", "mode": "run"},
+    )
+    assert run.status_code == 201
+    assert run.json()["mode"] == "run"
+    job = json.loads(captured_jobs.sent[0][1])
+    assert [c["ordinal"] for c in job["cases"]] == [1]  # sample case only
+
+
+async def test_submit_mode_grades_every_case(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fake_question_client: FakeQuestionClient,
+    captured_jobs: FakePublisher,
+    org_id: uuid.UUID,
+) -> None:
+    exam = await _setup_exam(db_session, fake_question_client, org_id)
+    headers = _headers(exam)
+    await client.post("/candidate/session/start", headers=headers)
+
+    submitted = await client.post(
+        "/candidate/session/questions/1/submissions",
+        headers=headers,
+        json={"language": "python", "source": "print(1)\n", "mode": "submit"},
+    )
+    assert submitted.status_code == 201
+    assert submitted.json()["mode"] == "submit"
+    job = json.loads(captured_jobs.sent[0][1])
+    assert [c["ordinal"] for c in job["cases"]] == [1, 2]  # sample + hidden
 
 
 async def test_timer_expiry_locks_session_and_blocks_submit(

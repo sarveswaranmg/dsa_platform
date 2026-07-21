@@ -1,0 +1,16 @@
+.invite {
+  max-width: 32rem;
+  margin: 4rem auto;
+  padding: 0 1.5rem;
+  text-align: center;
+}
+
+.invite__google {
+  display: flex;
+  justify-content: center;
+  margin: 1.5rem 0;
+}
+
+.invite__error {
+  color: #b91c1c;
+}

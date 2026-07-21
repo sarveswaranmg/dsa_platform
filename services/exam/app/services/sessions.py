@@ -187,6 +187,7 @@ async def submit(
     ordinal: int,
     language: str,
     source: str,
+    mode: str = "submit",
 ) -> Submission:
     exam_session = await sessions_repo.get_by_exam(session, org_id=org_id, exam_id=exam_id)
     if exam_session is None:
@@ -211,4 +212,5 @@ async def submit(
         language=language,
         source=source,
         session_id=exam_session.id,
+        mode=mode,
     )

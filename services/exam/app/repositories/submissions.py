@@ -19,6 +19,7 @@ async def create_submission(
     compare_mode: str,
     status: str,
     session_id: uuid.UUID | None = None,
+    mode: str = "submit",
 ) -> Submission:
     submission = Submission(
         org_id=org_id,
@@ -29,6 +30,7 @@ async def create_submission(
         source=source,
         compare_mode=compare_mode,
         status=status,
+        mode=mode,
     )
     session.add(submission)
     await session.flush()

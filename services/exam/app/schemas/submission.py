@@ -23,6 +23,7 @@ class SubmissionResponse(BaseModel):
     exam_id: uuid.UUID
     question_version_id: uuid.UUID
     language: str
+    mode: str
     status: str
     summary_verdict: str | None
     compile_error: str | None

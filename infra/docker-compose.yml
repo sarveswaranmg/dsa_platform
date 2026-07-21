@@ -103,5 +103,22 @@ services:
       localstack:
         condition: service_healthy
 
+  # Candidate exam UI (Vite dev server). Slice 9 will repoint the proxy at
+  # the gateway; for now it proxies /candidate straight to the exam service.
+  frontend:
+    image: node:20-slim
+    working_dir: /app
+    environment:
+      VITE_API_TARGET: http://exam:8000
+      VITE_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+    command: sh -c "npm install && npm run dev"
+    ports:
+      - "5173:5173"
+    volumes:
+      - ../frontend:/app
+      - /app/node_modules
+    depends_on:
+      - exam
+
 volumes:
   postgres-data:

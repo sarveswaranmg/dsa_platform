@@ -21,6 +21,7 @@ class TestCaseKeys:
     ordinal: int
     input_s3_key: str
     expected_output_s3_key: str
+    is_sample: bool = False
 
 
 @dataclass(frozen=True)
@@ -114,6 +115,7 @@ class HttpQuestionServiceClient:
                 ordinal=item["ordinal"],
                 input_s3_key=item["input_s3_key"],
                 expected_output_s3_key=item["expected_output_s3_key"],
+                is_sample=item["is_sample"],
             )
             for item in response.json()
         ]

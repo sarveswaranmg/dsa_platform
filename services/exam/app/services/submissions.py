@@ -8,7 +8,7 @@ from app.core.exceptions import NotFound
 from app.messaging.contracts import JobLimits, SubmissionJob, TestCaseRef
 from app.messaging.sqs import QueuePublisher
 from app.models.case_verdict import CaseVerdict
-from app.models.submission import Submission, SubmissionStatus
+from app.models.submission import Submission, SubmissionMode, SubmissionStatus
 from app.repositories import exams as exams_repo
 from app.repositories import submissions as submissions_repo
 
@@ -29,6 +29,7 @@ async def create_and_enqueue(
     source: str,
     compare_mode: str = "whitespace",
     session_id: uuid.UUID | None = None,
+    mode: str = SubmissionMode.SUBMIT.value,
 ) -> Submission:
     exam = await exams_repo.get_by_id(session, org_id=org_id, exam_id=exam_id)
     if exam is None:
@@ -38,6 +39,11 @@ async def create_and_enqueue(
     keys = await question_client.list_version_test_cases(
         org_id=org_id, version_id=question_version_id
     )
+    if mode == SubmissionMode.RUN.value:
+        # A trial run only exercises the question's sample cases.
+        keys = [k for k in keys if k.is_sample]
+        if not keys:
+            raise NotFound("This question has no sample test cases to run")
     if not keys:
         raise NotFound("No test cases for this question version")
 
@@ -51,6 +57,7 @@ async def create_and_enqueue(
         source=source,
         compare_mode=compare_mode,
         status=SubmissionStatus.QUEUED.value,
+        mode=mode,
     )
     await session.commit()
 

@@ -15,6 +15,14 @@ class SubmissionStatus(enum.StrEnum):
     ERROR = "error"
 
 
+class SubmissionMode(enum.StrEnum):
+    """A trial RUN grades only the question's sample test cases; a SUBMIT
+    grades the full suite."""
+
+    RUN = "run"
+    SUBMIT = "submit"
+
+
 class Submission(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "submissions"
 
@@ -26,6 +34,7 @@ class Submission(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     language: Mapped[str] = mapped_column(String(16))
     source: Mapped[str] = mapped_column(Text)
     compare_mode: Mapped[str] = mapped_column(String(16))
+    mode: Mapped[str] = mapped_column(String(8), default=SubmissionMode.SUBMIT.value)
     # Stored as a plain string (StrEnum values); avoids a Postgres enum + the
     # migration bookkeeping that comes with it.
     status: Mapped[str] = mapped_column(String(16), default=SubmissionStatus.QUEUED.value)

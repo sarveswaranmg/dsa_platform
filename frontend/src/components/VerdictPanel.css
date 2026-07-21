@@ -1,0 +1,70 @@
+.verdicts {
+  border-top: 1px solid #e2e8f0;
+  padding: 0.75rem 1rem;
+  overflow: auto;
+}
+
+.verdicts__empty {
+  color: #64748b;
+  margin: 0;
+}
+
+.verdicts__summary {
+  font-weight: 600;
+  margin: 0 0 0.5rem;
+}
+
+.verdicts__mode {
+  font-weight: 400;
+  color: #64748b;
+}
+
+.verdicts__summary--AC {
+  color: #15803d;
+}
+
+.verdicts__summary--WA,
+.verdicts__summary--RE,
+.verdicts__summary--CE,
+.verdicts__summary--TLE,
+.verdicts__summary--MLE {
+  color: #b91c1c;
+}
+
+.verdicts__compile-error {
+  background: #0f172a;
+  color: #fca5a5;
+  padding: 0.75rem;
+  border-radius: 6px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+}
+
+.verdicts__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.verdicts__table th,
+.verdicts__table td {
+  text-align: left;
+  padding: 0.25rem 0.5rem;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.verdict {
+  font-weight: 600;
+}
+
+.verdict--AC {
+  color: #15803d;
+}
+
+.verdict--WA,
+.verdict--RE,
+.verdict--TLE,
+.verdict--MLE,
+.verdict--CE {
+  color: #b91c1c;
+}

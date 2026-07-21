@@ -61,3 +61,5 @@ class QuestionContentResponse(BaseModel):
 class SessionSubmitRequest(BaseModel):
     language: str = Field(pattern="^(python|java|cpp)$")
     source: str = Field(min_length=1, max_length=200_000)
+    # "run" grades only the sample cases; "submit" grades the full suite.
+    mode: str = Field(default="submit", pattern="^(run|submit)$")

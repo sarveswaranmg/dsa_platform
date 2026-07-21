@@ -1,0 +1,19 @@
+.question-nav {
+  display: flex;
+  gap: 0.375rem;
+}
+
+.question-nav__item {
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  border-radius: 6px;
+  padding: 0.25rem 0.625rem;
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+
+.question-nav__item--active {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+  color: #fff;
+}
