@@ -5,7 +5,7 @@ from typing import Protocol
 import httpx
 
 from app.core.config import get_settings
-from app.core.exceptions import UpstreamServiceError
+from app.core.exceptions import NotFound, UpstreamServiceError
 
 
 @dataclass(frozen=True)
@@ -23,10 +23,31 @@ class TestCaseKeys:
     expected_output_s3_key: str
 
 
+@dataclass(frozen=True)
+class PublishedQuestionRef:
+    question_id: uuid.UUID
+    published_version_id: uuid.UUID
+    difficulty: int
+
+
+@dataclass(frozen=True)
+class VersionContent:
+    version_id: uuid.UUID
+    question_id: uuid.UUID
+    version_number: int
+    title: str
+    statement_md: str
+    constraints_md: str
+    difficulty: int
+    time_limit_ms: int
+    memory_limit_mb: int
+    starter_code: dict[str, str]
+
+
 class QuestionServiceClient(Protocol):
     """The exam service reaches the question service over HTTP only (no code
-    imports). Implementations forward the caller's bearer token so the
-    question service applies org scoping and role checks itself."""
+    imports). Examiner-plane calls forward the caller's bearer token; candidate-
+    plane calls use the org-scoped internal endpoints (trusted network)."""
 
     async def list_published_questions(
         self, *, authorization: str, topic_id: uuid.UUID, difficulty: int
@@ -35,6 +56,14 @@ class QuestionServiceClient(Protocol):
     async def list_version_test_cases(
         self, *, org_id: uuid.UUID, version_id: uuid.UUID
     ) -> list[TestCaseKeys]: ...
+
+    async def list_published_questions_internal(
+        self, *, org_id: uuid.UUID, topic_id: uuid.UUID, difficulty: int
+    ) -> list[PublishedQuestionRef]: ...
+
+    async def get_version_content(
+        self, *, org_id: uuid.UUID, version_id: uuid.UUID
+    ) -> VersionContent: ...
 
 
 class HttpQuestionServiceClient:
@@ -88,6 +117,61 @@ class HttpQuestionServiceClient:
             )
             for item in response.json()
         ]
+
+    async def list_published_questions_internal(
+        self, *, org_id: uuid.UUID, topic_id: uuid.UUID, difficulty: int
+    ) -> list[PublishedQuestionRef]:
+        try:
+            async with httpx.AsyncClient(base_url=self._base_url, timeout=10.0) as client:
+                response = await client.get(
+                    "/internal/published-questions",
+                    params={
+                        "org_id": str(org_id),
+                        "topic_id": str(topic_id),
+                        "difficulty": difficulty,
+                    },
+                )
+        except httpx.HTTPError as exc:
+            raise UpstreamServiceError() from exc
+        if response.status_code != 200:
+            raise UpstreamServiceError(f"Question service returned {response.status_code}")
+        return [
+            PublishedQuestionRef(
+                question_id=uuid.UUID(item["question_id"]),
+                published_version_id=uuid.UUID(item["published_version_id"]),
+                difficulty=item["difficulty"],
+            )
+            for item in response.json()
+        ]
+
+    async def get_version_content(
+        self, *, org_id: uuid.UUID, version_id: uuid.UUID
+    ) -> VersionContent:
+        try:
+            async with httpx.AsyncClient(base_url=self._base_url, timeout=10.0) as client:
+                response = await client.get(
+                    f"/internal/question-versions/{version_id}",
+                    params={"org_id": str(org_id)},
+                )
+        except httpx.HTTPError as exc:
+            raise UpstreamServiceError() from exc
+        if response.status_code == 404:
+            raise NotFound("Question version not found")
+        if response.status_code != 200:
+            raise UpstreamServiceError(f"Question service returned {response.status_code}")
+        item = response.json()
+        return VersionContent(
+            version_id=uuid.UUID(item["version_id"]),
+            question_id=uuid.UUID(item["question_id"]),
+            version_number=item["version_number"],
+            title=item["title"],
+            statement_md=item["statement_md"],
+            constraints_md=item["constraints_md"],
+            difficulty=item["difficulty"],
+            time_limit_ms=item["time_limit_ms"],
+            memory_limit_mb=item["memory_limit_mb"],
+            starter_code=item["starter_code"],
+        )
 
 
 def get_question_client() -> QuestionServiceClient:

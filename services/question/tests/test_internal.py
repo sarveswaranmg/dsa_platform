@@ -39,3 +39,44 @@ async def test_internal_scoped_by_org(
     )
     assert response.status_code == 200
     assert response.json() == []
+
+
+async def test_internal_published_questions_and_content(
+    client: AsyncClient, author: dict[str, str], org_id: uuid.UUID
+) -> None:
+    topic = (await client.post("/topics", headers=author, json={"name": "arrays"})).json()
+    q = await create_question_api(
+        client, author, difficulty=3, topic_ids=[topic["id"]]
+    )
+    # Draft questions are invisible; only published ones appear.
+    empty = await client.get(
+        "/internal/published-questions",
+        params={"org_id": str(org_id), "topic_id": topic["id"], "difficulty": 3},
+    )
+    assert empty.json() == []
+
+    await client.post(f"/questions/{q['id']}/publish", headers=author)
+    listed = await client.get(
+        "/internal/published-questions",
+        params={"org_id": str(org_id), "topic_id": topic["id"], "difficulty": 3},
+    )
+    body = listed.json()
+    assert len(body) == 1
+    assert body[0]["question_id"] == q["id"]
+    version_id = body[0]["published_version_id"]
+
+    content = await client.get(
+        f"/internal/question-versions/{version_id}", params={"org_id": str(org_id)}
+    )
+    assert content.status_code == 200
+    assert content.json()["title"] == q["current_version"]["title"]
+    assert content.json()["difficulty"] == 3
+
+
+async def test_internal_version_content_not_found(
+    client: AsyncClient, org_id: uuid.UUID
+) -> None:
+    response = await client.get(
+        f"/internal/question-versions/{uuid.uuid4()}", params={"org_id": str(org_id)}
+    )
+    assert response.status_code == 404

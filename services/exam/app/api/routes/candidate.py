@@ -20,12 +20,14 @@ from app.schemas.candidate import (
     ExchangeRequest,
     ExchangeResponse,
 )
-from app.schemas.submission import (
-    CaseVerdictResponse,
-    SubmissionResponse,
-    SubmitRequest,
+from app.schemas.session import (
+    QuestionContentResponse,
+    SessionResponse,
+    SessionSubmitRequest,
 )
+from app.schemas.submission import CaseVerdictResponse, SubmissionResponse
 from app.services import candidate_auth as candidate_auth_service
+from app.services import sessions as sessions_service
 from app.services import submissions as submissions_service
 
 router = APIRouter(prefix="/candidate", tags=["candidate"])
@@ -73,21 +75,81 @@ def _submission_response(
     )
 
 
-@router.post("/submissions", response_model=SubmissionResponse, status_code=201)
-async def create_submission(
-    body: SubmitRequest,
+@router.post("/session/start", response_model=SessionResponse, status_code=201)
+async def start_session(
+    ctx: CandidateCtx, session: DB, redis: RedisDep, question_client: QuestionClient
+) -> SessionResponse:
+    exam_session = await sessions_service.start_session(
+        session,
+        redis,
+        question_client,
+        org_id=ctx.org_id,
+        exam_id=ctx.exam_id,
+        candidate_email=ctx.candidate_email,
+    )
+    _, questions = await sessions_service.get_session(
+        session, redis, org_id=ctx.org_id, exam_id=ctx.exam_id
+    )
+    return SessionResponse.build(exam_session, questions)
+
+
+@router.get("/session", response_model=SessionResponse)
+async def get_session(
+    ctx: CandidateCtx, session: DB, redis: RedisDep
+) -> SessionResponse:
+    exam_session, questions = await sessions_service.get_session(
+        session, redis, org_id=ctx.org_id, exam_id=ctx.exam_id
+    )
+    return SessionResponse.build(exam_session, questions)
+
+
+@router.get(
+    "/session/questions/{ordinal}", response_model=QuestionContentResponse
+)
+async def get_session_question(
+    ordinal: int, ctx: CandidateCtx, session: DB, redis: RedisDep,
+    question_client: QuestionClient,
+) -> QuestionContentResponse:
+    assigned, content = await sessions_service.get_question_content(
+        session, redis, question_client, org_id=ctx.org_id, exam_id=ctx.exam_id,
+        ordinal=ordinal,
+    )
+    return QuestionContentResponse(
+        ordinal=assigned.ordinal,
+        question_id=assigned.question_id,
+        question_version_id=assigned.question_version_id,
+        title=content.title,
+        statement_md=content.statement_md,
+        constraints_md=content.constraints_md,
+        difficulty=content.difficulty,
+        time_limit_ms=content.time_limit_ms,
+        memory_limit_mb=content.memory_limit_mb,
+        starter_code=content.starter_code,
+    )
+
+
+@router.post(
+    "/session/questions/{ordinal}/submissions",
+    response_model=SubmissionResponse,
+    status_code=201,
+)
+async def submit_for_question(
+    ordinal: int,
+    body: SessionSubmitRequest,
     ctx: CandidateCtx,
     session: DB,
+    redis: RedisDep,
     question_client: QuestionClient,
     publisher: PublisherDep,
 ) -> SubmissionResponse:
-    submission = await submissions_service.create_and_enqueue(
+    submission = await sessions_service.submit(
         session,
+        redis,
         question_client,
         publisher,
         org_id=ctx.org_id,
         exam_id=ctx.exam_id,
-        question_version_id=body.question_version_id,
+        ordinal=ordinal,
         language=body.language,
         source=body.source,
     )

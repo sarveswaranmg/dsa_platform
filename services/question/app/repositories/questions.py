@@ -50,6 +50,31 @@ async def list_by_org(
     return [(row[0], row[1]) for row in result.all()]
 
 
+async def list_published_by_topic_difficulty(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    topic_id: uuid.UUID,
+    difficulty: int,
+) -> Sequence[tuple[uuid.UUID, uuid.UUID, int]]:
+    """(question_id, published_version_id, difficulty) for published questions
+    on a topic at a difficulty. Joins the PUBLISHED version (not current), so a
+    draft edit in flight is invisible to candidates."""
+    stmt = (
+        select(Question.id, QuestionVersion.id, QuestionVersion.difficulty)
+        .join(QuestionVersion, Question.published_version_id == QuestionVersion.id)
+        .join(question_topics, question_topics.c.question_id == Question.id)
+        .where(
+            Question.org_id == org_id,
+            question_topics.c.topic_id == topic_id,
+            QuestionVersion.difficulty == difficulty,
+        )
+        .order_by(Question.id)
+    )
+    result = await session.execute(stmt)
+    return [(row[0], row[1], row[2]) for row in result.all()]
+
+
 async def create_version(
     session: AsyncSession,
     *,

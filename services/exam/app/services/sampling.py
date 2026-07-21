@@ -17,6 +17,25 @@ def _seed(blueprint_version_id: uuid.UUID, candidate_key: str, entry_index: int)
     return int.from_bytes(hashlib.sha256(payload).digest()[:8], "big")
 
 
+def choose[T](
+    pool_sorted: list[T],
+    *,
+    blueprint_version_id: uuid.UUID,
+    candidate_key: str,
+    entry_index: int,
+    count: int,
+) -> list[T]:
+    """Deterministically pick `count` items from a stably-ordered pool. Shared
+    by the examiner sample preview and the candidate session assignment so both
+    reproduce the same per-candidate selection. Caller sorts the pool."""
+    if len(pool_sorted) < count:
+        raise InsufficientQuestionPool(
+            f"pool has {len(pool_sorted)} questions but {count} are required"
+        )
+    rng = random.Random(_seed(blueprint_version_id, candidate_key, entry_index))
+    return rng.sample(pool_sorted, count)
+
+
 async def sample_blueprint(
     session: AsyncSession,
     *,
@@ -48,14 +67,13 @@ async def sample_blueprint(
 
         # Sort by id so question-service ordering can't perturb the sample.
         ordered = sorted(pool.values(), key=lambda r: r.id)
-        if len(ordered) < count:
-            raise InsufficientQuestionPool(
-                f"Topic {topic_id} needs {count} questions "
-                f"(difficulty {d_min}-{d_max}) but only {len(ordered)} are published"
-            )
-
-        rng = random.Random(_seed(version.id, candidate_key, index))
-        chosen = rng.sample(ordered, count)
+        chosen = choose(
+            ordered,
+            blueprint_version_id=version.id,
+            candidate_key=candidate_key,
+            entry_index=index,
+            count=count,
+        )
         selections.append(
             TopicSelection(
                 topic_id=topic_id,

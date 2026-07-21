@@ -3,7 +3,12 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.clients.question_service import QuestionRef, TestCaseKeys
+from app.clients.question_service import (
+    PublishedQuestionRef,
+    QuestionRef,
+    TestCaseKeys,
+    VersionContent,
+)
 from app.messaging.contracts import (
     CaseResult,
     SubmissionJob,
@@ -29,6 +34,16 @@ class FakeQuestionClient:
         self, *, org_id: uuid.UUID, version_id: uuid.UUID
     ) -> list[TestCaseKeys]:
         return self.keys
+
+    async def list_published_questions_internal(
+        self, *, org_id: uuid.UUID, topic_id: uuid.UUID, difficulty: int
+    ) -> list[PublishedQuestionRef]:
+        raise NotImplementedError
+
+    async def get_version_content(
+        self, *, org_id: uuid.UUID, version_id: uuid.UUID
+    ) -> VersionContent:
+        raise NotImplementedError
 
 
 class FakePublisher:

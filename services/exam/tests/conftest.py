@@ -11,7 +11,13 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engin
 from sqlalchemy.pool import NullPool
 
 from alembic import command
-from app.clients.question_service import QuestionRef, get_question_client
+from app.clients.question_service import (
+    PublishedQuestionRef,
+    QuestionRef,
+    TestCaseKeys,
+    VersionContent,
+    get_question_client,
+)
 from app.core.config import get_settings
 from app.core.redis import get_redis
 from app.core.security import create_access_token
@@ -123,22 +129,60 @@ class AuthHelper:
 
 
 class FakeQuestionClient:
-    """Stand-in for the question service so exam tests stay hermetic. Records
-    the Authorization header it was handed (to prove token forwarding) and
-    returns canned published-question pools per topic."""
+    """Stand-in for the question service so exam tests stay hermetic. Serves
+    the examiner-plane sampling pool (token-forwarding) and the candidate-plane
+    internal endpoints (published questions, version content, test-case keys)."""
 
     def __init__(self) -> None:
         self.pools: dict[uuid.UUID, list[QuestionRef]] = {}
+        self.internal_pools: dict[uuid.UUID, list[PublishedQuestionRef]] = {}
+        self.versions: dict[uuid.UUID, VersionContent] = {}
+        self.test_case_keys: dict[uuid.UUID, list[TestCaseKeys]] = {}
         self.seen_authorizations: list[str] = []
 
     def set_pool(self, topic_id: uuid.UUID, refs: list[QuestionRef]) -> None:
         self.pools[topic_id] = refs
+
+    def set_internal_pool(
+        self, topic_id: uuid.UUID, refs: list[PublishedQuestionRef]
+    ) -> None:
+        self.internal_pools[topic_id] = refs
+
+    def set_version(self, content: VersionContent) -> None:
+        self.versions[content.version_id] = content
+        # Every published version has one trivial test case so submit works.
+        self.test_case_keys.setdefault(
+            content.version_id,
+            [TestCaseKeys(ordinal=1, input_s3_key="in", expected_output_s3_key="out")],
+        )
 
     async def list_published_questions(
         self, *, authorization: str, topic_id: uuid.UUID, difficulty: int
     ) -> list[QuestionRef]:
         self.seen_authorizations.append(authorization)
         return [r for r in self.pools.get(topic_id, []) if r.difficulty == difficulty]
+
+    async def list_published_questions_internal(
+        self, *, org_id: uuid.UUID, topic_id: uuid.UUID, difficulty: int
+    ) -> list[PublishedQuestionRef]:
+        return [
+            r for r in self.internal_pools.get(topic_id, []) if r.difficulty == difficulty
+        ]
+
+    async def get_version_content(
+        self, *, org_id: uuid.UUID, version_id: uuid.UUID
+    ) -> VersionContent:
+        from app.core.exceptions import NotFound
+
+        content = self.versions.get(version_id)
+        if content is None:
+            raise NotFound("Question version not found")
+        return content
+
+    async def list_version_test_cases(
+        self, *, org_id: uuid.UUID, version_id: uuid.UUID
+    ) -> list[TestCaseKeys]:
+        return self.test_case_keys.get(version_id, [])
 
 
 @pytest.fixture
@@ -176,6 +220,19 @@ def fake_email_sender() -> FakeEmailSender:
 @pytest.fixture
 def fake_oidc_verifier() -> FakeGoogleVerifier:
     return FakeGoogleVerifier()
+
+
+class FakePublisher:
+    def __init__(self) -> None:
+        self.sent: list[tuple[str, str]] = []
+
+    def send(self, queue: str, body: str) -> None:
+        self.sent.append((queue, body))
+
+
+@pytest.fixture
+def fake_publisher() -> FakePublisher:
+    return FakePublisher()
 
 
 @pytest.fixture

@@ -18,10 +18,12 @@ async def create_submission(
     source: str,
     compare_mode: str,
     status: str,
+    session_id: uuid.UUID | None = None,
 ) -> Submission:
     submission = Submission(
         org_id=org_id,
         exam_id=exam_id,
+        session_id=session_id,
         question_version_id=question_version_id,
         language=language,
         source=source,

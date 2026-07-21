@@ -28,6 +28,7 @@ async def create_and_enqueue(
     language: str,
     source: str,
     compare_mode: str = "whitespace",
+    session_id: uuid.UUID | None = None,
 ) -> Submission:
     exam = await exams_repo.get_by_id(session, org_id=org_id, exam_id=exam_id)
     if exam is None:
@@ -44,6 +45,7 @@ async def create_and_enqueue(
         session,
         org_id=org_id,
         exam_id=exam_id,
+        session_id=session_id,
         question_version_id=question_version_id,
         language=language,
         source=source,

@@ -75,6 +75,16 @@ class OIDCError(DomainError):
     detail = "Google authentication failed"
 
 
+class ExamWindowClosed(DomainError):
+    status_code = 403
+    detail = "The exam is not open right now"
+
+
+class SessionLocked(DomainError):
+    status_code = 409
+    detail = "The exam session has ended and is locked"
+
+
 class UpstreamServiceError(DomainError):
     status_code = 502
     detail = "Question service is unavailable"
