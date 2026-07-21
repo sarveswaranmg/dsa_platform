@@ -1,10 +1,16 @@
 COMPOSE := docker compose -f infra/docker-compose.yml
 BACKEND_SERVICES := $(patsubst services/%/pyproject.toml,%,$(wildcard services/*/pyproject.toml))
 
-.PHONY: dev infra-up test lint migrate
+.PHONY: dev infra-up test lint migrate judge-images
 
 dev:
 	$(COMPOSE) up --build
+
+# Build the per-language sandbox runner images the judge launches.
+judge-images:
+	docker build -f services/judge/runners/python/Dockerfile -t dsa-judge-python:3.12 services/judge/runners
+	docker build -f services/judge/runners/java/Dockerfile -t dsa-judge-java:21 services/judge/runners
+	docker build -f services/judge/runners/cpp/Dockerfile -t dsa-judge-cpp:13 services/judge/runners
 
 infra-up:
 	$(COMPOSE) up -d --wait postgres redis localstack

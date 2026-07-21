@@ -19,6 +19,18 @@ class Settings(BaseSettings):
     # compose-mapped port; inside the compose network it is http://question:8000.
     question_service_url: str = "http://localhost:8002"
 
+    # Judge pipeline (SQS via localstack). The exam service publishes
+    # submission jobs and consumes verdicts (no code imports — queue only).
+    sqs_endpoint_url: str = "http://localhost:4566"
+    submissions_queue: str = "dsa-submissions"
+    verdicts_queue: str = "dsa-verdicts"
+    aws_access_key_id: str = "test"
+    aws_secret_access_key: str = "test"
+    aws_region: str = "us-east-1"
+    # Start the background verdict consumer in the app lifespan (dev/prod);
+    # tests leave it off and call process_verdict_message directly.
+    enable_verdict_consumer: bool = True
+
     # Candidate invite flow.
     google_client_id: str = "dev-google-client-id.apps.googleusercontent.com"
     google_client_secret: str = "dev-google-client-secret"

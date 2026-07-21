@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from app.api.routes import health, questions, test_cases, topics
+from app.api.routes import health, internal, questions, test_cases, topics
 from app.core import s3
 from app.core.config import get_settings
 from app.core.exceptions import DomainError
@@ -31,6 +31,7 @@ def create_app() -> FastAPI:
     app.include_router(topics.router)
     app.include_router(questions.router)
     app.include_router(test_cases.router)
+    app.include_router(internal.router)
     return app
 
 

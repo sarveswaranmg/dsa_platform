@@ -1,0 +1,45 @@
+[project]
+name = "judge-service"
+version = "0.1.0"
+description = "Judge service: SQS consumer + sandboxed execution of untrusted code"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "boto3>=1.34",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "boto3-stubs[s3,sqs]>=1.34",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: exercises real Docker containers and localstack (needs the docker socket)",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+[tool.ruff.lint.per-file-ignores]
+# Integration tests embed full source programs as string literals.
+"tests/test_pipeline_integration.py" = ["E501"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true

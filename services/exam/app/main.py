@@ -1,3 +1,5 @@
+import asyncio
+import contextlib
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -5,16 +7,29 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from app.api.routes import auth, blueprints, candidate, examiners, exams, health
+from app.core.config import get_settings
 from app.core.exceptions import DomainError
 from app.core.redis import close_redis
 from app.db.session import dispose_engine
+from app.messaging.consumer import run_verdict_consumer
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    yield
-    await dispose_engine()
-    await close_redis()
+    stop = asyncio.Event()
+    consumer_task: asyncio.Task[None] | None = None
+    if get_settings().enable_verdict_consumer:
+        consumer_task = asyncio.create_task(run_verdict_consumer(stop))
+    try:
+        yield
+    finally:
+        stop.set()
+        if consumer_task is not None:
+            consumer_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await consumer_task
+        await dispose_engine()
+        await close_redis()
 
 
 async def domain_error_handler(request: Request, exc: Exception) -> JSONResponse:
