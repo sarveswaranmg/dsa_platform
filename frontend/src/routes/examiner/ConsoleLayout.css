@@ -1,0 +1,129 @@
+.console {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.console__bar {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 0.625rem 1.25rem;
+  background: #0f172a;
+  color: #e2e8f0;
+}
+
+.console__brand {
+  font-weight: 600;
+}
+
+.console__nav {
+  display: flex;
+  gap: 0.25rem;
+  flex: 1;
+}
+
+.console__link {
+  color: #cbd5e1;
+  text-decoration: none;
+  padding: 0.3125rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.875rem;
+}
+
+.console__link--active {
+  background: #1e293b;
+  color: #fff;
+}
+
+.console__account {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.8125rem;
+}
+
+.console__role {
+  color: #94a3b8;
+}
+
+.console__signout {
+  background: transparent;
+  border: 1px solid #334155;
+  color: #e2e8f0;
+  border-radius: 6px;
+  padding: 0.25rem 0.625rem;
+  cursor: pointer;
+}
+
+.console__content {
+  flex: 1;
+  padding: 1.25rem;
+  max-width: 1200px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.console-denied {
+  padding: 3rem 1.5rem;
+  text-align: center;
+}
+
+.console-form {
+  display: grid;
+  gap: 0.75rem;
+  max-width: 30rem;
+}
+
+.console-form label {
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.8125rem;
+  color: #334155;
+}
+
+.console-form input,
+.console-form select,
+.console-form textarea {
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 0.4375rem 0.625rem;
+  font: inherit;
+}
+
+.console-button {
+  border: 1px solid #1d4ed8;
+  background: #1d4ed8;
+  color: #fff;
+  border-radius: 6px;
+  padding: 0.4375rem 1rem;
+  cursor: pointer;
+  justify-self: start;
+}
+
+.console-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.console-button--secondary {
+  background: #fff;
+  color: #1d4ed8;
+}
+
+.console-error {
+  color: #b91c1c;
+}
+
+.console-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.console-table th,
+.console-table td {
+  text-align: left;
+  padding: 0.4375rem 0.625rem;
+  border-bottom: 1px solid #e2e8f0;
+}

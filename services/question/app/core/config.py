@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     s3_endpoint_url: str = "http://localhost:4566"
     s3_presign_endpoint_url: str = "http://localhost:4566"
     s3_bucket: str = "question-artifacts"
+    # Origins allowed to PUT test-case files straight to S3 (dev bootstrap).
+    s3_cors_origins: list[str] = ["http://localhost:5173"]
     s3_presign_ttl_seconds: int = 900
     aws_access_key_id: str = "test"
     aws_secret_access_key: str = "test"

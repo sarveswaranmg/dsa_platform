@@ -87,6 +87,17 @@ async def upsert_case_verdict(
     await session.execute(stmt)
 
 
+async def list_by_exam(
+    session: AsyncSession, *, org_id: uuid.UUID, exam_id: uuid.UUID
+) -> list[Submission]:
+    result = await session.execute(
+        select(Submission)
+        .where(Submission.exam_id == exam_id, Submission.org_id == org_id)
+        .order_by(Submission.created_at)
+    )
+    return list(result.scalars().all())
+
+
 async def list_case_verdicts(
     session: AsyncSession, *, org_id: uuid.UUID, submission_id: uuid.UUID
 ) -> list[CaseVerdict]:

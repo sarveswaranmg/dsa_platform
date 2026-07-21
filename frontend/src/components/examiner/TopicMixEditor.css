@@ -1,0 +1,49 @@
+.topic-mix input,
+.topic-mix select {
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 0.25rem 0.4375rem;
+  font: inherit;
+  width: 100%;
+}
+
+.topic-mix__range {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.topic-mix__range input {
+  width: 4rem;
+}
+
+.topic-mix__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 0.75rem;
+}
+
+.topic-mix__total {
+  font-weight: 600;
+  color: #b45309;
+}
+
+.topic-mix__total--ok {
+  color: #15803d;
+}
+
+.topic-mix__remove {
+  border: none;
+  background: transparent;
+  color: #b91c1c;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.topic-mix__problems {
+  margin: 0.75rem 0 0;
+  padding-left: 1.25rem;
+  color: #b91c1c;
+  font-size: 0.875rem;
+}

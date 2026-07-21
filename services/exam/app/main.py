@@ -6,7 +6,15 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from app.api.routes import auth, blueprints, candidate, examiners, exams, health
+from app.api.routes import (
+    auth,
+    blueprints,
+    candidate,
+    examiners,
+    exams,
+    health,
+    results,
+)
 from app.core.config import get_settings
 from app.core.exceptions import DomainError
 from app.core.redis import close_redis
@@ -45,6 +53,7 @@ def create_app() -> FastAPI:
     app.include_router(examiners.router)
     app.include_router(blueprints.router)
     app.include_router(exams.router)
+    app.include_router(results.router)
     app.include_router(candidate.router)
     return app
 

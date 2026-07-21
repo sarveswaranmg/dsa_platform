@@ -44,11 +44,29 @@ def presign_get(key: str) -> str:
 
 
 def ensure_bucket() -> None:
-    """Create the bucket if missing. Dev/test bootstrap only — never called
-    in a request path."""
+    """Create the bucket if missing and allow browser uploads to presigned
+    URLs. Dev/test bootstrap only — never called in a request path. In prod the
+    bucket and its CORS policy are provisioned by Terraform, not by the app."""
     settings = get_settings()
     client = _client(settings.s3_endpoint_url)
     try:
         client.head_bucket(Bucket=settings.s3_bucket)
     except client.exceptions.ClientError:
         client.create_bucket(Bucket=settings.s3_bucket)
+
+    # The examiner console PUTs test-case files straight to S3 from the
+    # browser, which is cross-origin against localstack.
+    client.put_bucket_cors(
+        Bucket=settings.s3_bucket,
+        CORSConfiguration={
+            "CORSRules": [
+                {
+                    "AllowedMethods": ["GET", "PUT"],
+                    "AllowedOrigins": settings.s3_cors_origins,
+                    "AllowedHeaders": ["*"],
+                    "ExposeHeaders": ["ETag"],
+                    "MaxAgeSeconds": 3000,
+                }
+            ]
+        },
+    )
