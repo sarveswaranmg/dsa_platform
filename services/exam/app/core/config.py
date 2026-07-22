@@ -11,7 +11,9 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     env: str = "dev"
 
-    jwt_secret: str = "dev-jwt-secret-change-me-not-for-production-use"
+    # RS256 private key (PEM). Exam is the only service that signs — the
+    # public key is derived from this in-memory, never configured separately.
+    rs256_private_key: str
     access_token_ttl_seconds: int = 900  # 15 minutes
     refresh_token_ttl_seconds: int = 604_800  # 7 days
 
@@ -40,4 +42,4 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    return Settings()  # type: ignore[call-arg]  # required fields come from env vars

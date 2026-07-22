@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.exceptions import InvalidWindow, NotFound
+from app.core.redis_keys import invite_key
 from app.core.security import create_invite_token
 from app.models.exam import Exam
 from app.models.invite import Invite
@@ -69,7 +70,7 @@ async def schedule_exam(
     # Redis is the single-use authority; TTL retires the key when the window ends.
     ttl = max(1, int((ends_at - now).total_seconds()))
     await redis.set(
-        f"invite:{jti}",
+        invite_key(jti),
         json.dumps({"invite_id": str(invite.id), "exam_id": str(exam.id)}),
         ex=ttl,
     )

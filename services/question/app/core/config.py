@@ -10,7 +10,9 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://dsa:dsa@localhost:5433/question"
     env: str = "dev"
 
-    jwt_secret: str = "dev-jwt-secret-change-me-not-for-production-use"
+    # RS256 public key (PEM) used to verify tokens exam signs. Question never
+    # holds a private key — it never issues tokens.
+    rs256_public_key: str
 
     # S3 (localstack in dev). Presign endpoint is separate because URLs are
     # consumed outside the compose network (browser/host), where the
@@ -28,4 +30,4 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    return Settings()  # type: ignore[call-arg]  # required fields come from env vars

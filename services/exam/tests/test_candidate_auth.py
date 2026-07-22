@@ -3,9 +3,10 @@ from datetime import UTC, datetime, timedelta
 from urllib.parse import parse_qs, urlparse
 
 from httpx import AsyncClient, Response
+from redis.asyncio import Redis
 
 from app.core.exceptions import OIDCError
-from app.core.security import create_invite_token
+from app.core.security import create_invite_token, decode_invite_token
 from app.oidc.google import VerifiedIdentity
 from tests.conftest import FakeGoogleVerifier, one_topic_blueprint
 
@@ -70,6 +71,17 @@ async def test_exchange_happy_issues_exam_token(
     # Invite is now consumed.
     exam = await client.get(f"/exams/{exam_id}", headers=author)
     assert exam.json()["invite"]["status"] == "consumed"
+
+
+async def test_exchange_consumes_the_prefixed_redis_key(
+    client: AsyncClient, author: dict[str, str], redis_client: Redis
+) -> None:
+    _, token = await _schedule(client, author)
+    jti = str(decode_invite_token(token)["jti"])
+    assert await redis_client.exists(f"ex:invite:{jti}")
+
+    assert (await _exchange(client, token)).status_code == 200
+    assert not await redis_client.exists(f"ex:invite:{jti}")
 
 
 async def test_exchange_tampered_token_rejected(

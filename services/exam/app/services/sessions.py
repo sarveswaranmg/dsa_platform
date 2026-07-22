@@ -19,6 +19,7 @@ from app.clients.question_service import (
     VersionContent,
 )
 from app.core.exceptions import ExamWindowClosed, NotFound, SessionLocked
+from app.core.redis_keys import session_key
 from app.messaging.sqs import QueuePublisher
 from app.models.exam_session import ExamSession, SessionStatus
 from app.models.session_question import SessionQuestion
@@ -32,10 +33,6 @@ from app.services.sampling import choose
 _REDIS_GRACE_SECONDS = 60
 
 
-def _redis_key(session_id: uuid.UUID) -> str:
-    return f"session:{session_id}"
-
-
 async def _mirror_to_redis(
     redis: Redis, exam_session: ExamSession
 ) -> None:
@@ -47,7 +44,7 @@ async def _mirror_to_redis(
         int((exam_session.deadline_at - datetime.now(UTC)).total_seconds())
         + _REDIS_GRACE_SECONDS,
     )
-    await redis.set(_redis_key(exam_session.id), payload, ex=ttl)
+    await redis.set(session_key(exam_session.id), payload, ex=ttl)
 
 
 async def _lock_if_expired(

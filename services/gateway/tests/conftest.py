@@ -1,18 +1,35 @@
+import os
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
+
+# Must run before any `app.*` import touches Settings: dev/test RS256 public
+# key, committed at infra/dev-keys/ (see infra/dev-keys/README.md).
+_DEV_KEYS = Path(__file__).resolve().parents[3] / "infra" / "dev-keys"
+os.environ.setdefault("RS256_PUBLIC_KEY", (_DEV_KEYS / "rs256-public.pem").read_text())
 
 import httpx
 import jwt
 import pytest
+from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
+from cryptography.hazmat.primitives.serialization import load_pem_private_key
 from httpx import ASGITransport, AsyncClient
 
 from app.auth import Identity
-from app.config import get_settings
 from app.deps import get_forwarder, get_rate_limiter
 from app.main import create_app
 from app.routing import Upstream
+
+# Test-only: signs fixture tokens with the dev private key so gateway's
+# verify-only code can be exercised end to end. Production gateway code
+# (app/) never imports a private key — only this test fixture does.
+_test_private_key = load_pem_private_key(
+    (_DEV_KEYS / "rs256-private.pem").read_bytes(), password=None
+)
+assert isinstance(_test_private_key, RSAPrivateKey)
+_TEST_PRIVATE_KEY: RSAPrivateKey = _test_private_key
 
 
 class FakeForwarder:
@@ -89,7 +106,7 @@ def _token(token_type: str, sub: str | None = None) -> str:
         "exp": now + timedelta(minutes=15),
         "iat": now,
     }
-    return jwt.encode(payload, get_settings().jwt_secret, algorithm="HS256")
+    return jwt.encode(payload, _TEST_PRIVATE_KEY, algorithm="RS256")
 
 
 def examiner_headers(sub: str | None = None) -> dict[str, str]:

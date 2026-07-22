@@ -2,12 +2,15 @@ import hashlib
 import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
+from functools import lru_cache
 from typing import Any
 
 import jwt
 import pyotp
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError
+from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey, RSAPublicKey
+from cryptography.hazmat.primitives.serialization import load_pem_private_key
 
 from app.core.config import get_settings
 from app.core.exceptions import InviteInvalid, TokenInvalid
@@ -19,6 +22,18 @@ TOKEN_TYPE_CANDIDATE_EXAM = "candidate_exam"
 TOTP_ISSUER = "DSA Exam Platform"
 
 _password_hasher = PasswordHasher()
+
+
+@lru_cache
+def _private_key() -> RSAPrivateKey:
+    key = load_pem_private_key(get_settings().rs256_private_key.encode(), password=None)
+    assert isinstance(key, RSAPrivateKey)
+    return key
+
+
+@lru_cache
+def _public_key() -> RSAPublicKey:
+    return _private_key().public_key()
 
 
 def hash_password(password: str) -> str:
@@ -51,16 +66,15 @@ def create_access_token(
         "iat": now,
         "exp": now + timedelta(seconds=ttl),
     }
-    return jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
+    return jwt.encode(payload, _private_key(), algorithm="RS256")
 
 
 def decode_access_token(token: str) -> dict[str, Any]:
-    settings = get_settings()
     try:
         payload: dict[str, Any] = jwt.decode(
             token,
-            settings.jwt_secret,
-            algorithms=["HS256"],
+            _public_key(),
+            algorithms=["RS256"],
             options={"require": ["sub", "org_id", "role", "type", "exp"]},
         )
     except jwt.PyJWTError as exc:
@@ -80,7 +94,6 @@ def create_invite_token(
     not_before: datetime,
     expires_at: datetime,
 ) -> str:
-    settings = get_settings()
     payload = {
         "jti": jti,
         "invite_id": str(invite_id),
@@ -92,18 +105,17 @@ def create_invite_token(
         "iat": not_before,
         "exp": expires_at,
     }
-    return jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
+    return jwt.encode(payload, _private_key(), algorithm="RS256")
 
 
 def decode_invite_token(token: str) -> dict[str, Any]:
     """Validate signature + window. Single-use is enforced separately against
     Redis. Any failure raises InviteInvalid (opaque — no reason leaked)."""
-    settings = get_settings()
     try:
         payload: dict[str, Any] = jwt.decode(
             token,
-            settings.jwt_secret,
-            algorithms=["HS256"],
+            _public_key(),
+            algorithms=["RS256"],
             options={
                 "require": ["jti", "invite_id", "exam_id", "org_id", "type", "exp"]
             },
@@ -125,7 +137,6 @@ def create_candidate_exam_token(
     not_before: datetime,
     expires_at: datetime,
 ) -> str:
-    settings = get_settings()
     payload = {
         "sub": str(invite_id),
         "org_id": str(org_id),
@@ -138,16 +149,15 @@ def create_candidate_exam_token(
         "iat": datetime.now(UTC),
         "exp": expires_at,
     }
-    return jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
+    return jwt.encode(payload, _private_key(), algorithm="RS256")
 
 
 def decode_candidate_exam_token(token: str) -> dict[str, Any]:
-    settings = get_settings()
     try:
         payload: dict[str, Any] = jwt.decode(
             token,
-            settings.jwt_secret,
-            algorithms=["HS256"],
+            _public_key(),
+            algorithms=["RS256"],
             options={
                 "require": ["sub", "org_id", "exam_id", "type", "exp"]
             },

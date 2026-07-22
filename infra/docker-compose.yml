@@ -46,7 +46,62 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-dsa}:${POSTGRES_PASSWORD:-dsa}@postgres:5432/${POSTGRES_DB:-exam}
       REDIS_URL: redis://redis:6379/0
-      JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-change-me-not-for-production-use}
+      # Dev keypair, committed at infra/dev-keys/ (see infra/dev-keys/README.md).
+      # Exam is the only service that signs; gateway/question get the public
+      # key only (below).
+      RS256_PRIVATE_KEY: |
+        -----BEGIN PRIVATE KEY-----
+        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
+        oacEKpVz3j8ywm9DDq4WR0snitFPZDc=
+        -----END PRIVATE KEY-----
       QUESTION_SERVICE_URL: http://question:8000
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-dev-google-client-id.apps.googleusercontent.com}
       FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-http://localhost:5173}
@@ -69,7 +124,23 @@ services:
     build: ../services/question
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-dsa}:${POSTGRES_PASSWORD:-dsa}@postgres:5432/question
-      JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-change-me-not-for-production-use}
+      # Dev keypair, committed at infra/dev-keys/ (see infra/dev-keys/README.md).
+      # Verify-only: question never signs, so it gets the public key only.
+      RS256_PUBLIC_KEY: |
+        -----BEGIN PUBLIC KEY-----
+        MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAo7RuAmhHOn1auFLusl8s
+        sqOxZVBrSs2uvYXvn5rEv16PcnaWXRe48tX+qlHOi2h+Zqy/KXN+54uJiEoi3+s0
+        Z8/ZInuHo/FY32BhY77alFi+a8OApCCgpHn7yO8m5KXlrA2qErmK7EPmdoZLVX35
+        NkNgAfhQKMWnfjnVh6nhuy0dN9Z3H2siHbNlkQo8VGtwkXw0eRrrI6oKi2fezYj9
+        FvmpZDiAHpzCXfRDVk1nqZaLWqF0xQj+DIxgJHX70pbbHuvkw9duadkvfmZcrvfk
+        1L0fMQa03/gUijpJ/bny9IVEdut3nVjgjWvrnUvhfPVWq0rT90tD0X3sffckBOtu
+        AfOvqt4Q82yyny3i7nF+UNI/MIZBxjPn3+gjOAl1z8bZgIjoRAHDvAqoArbTW8Mi
+        5jkQlGx9jaBo0p7TPX0wa5Kdq2kkmwcqJ9GlKsx15Zu+LV4++1lMX9VTYiej48Gk
+        O0jIDHlTIUW6xUWr5gUTLFNOfdZYs9hiNKz2s5/ZPBJK0YAdyI+D9jDrU45w6Q/9
+        /1cgpIXIUY5R+O6n9YSio6YZY4QSD9rnnDsRseyDQui3hA4KXrViPgfRJ8hP9LSb
+        v2NN0tDoKScwpZ7Vh5Q7ABbo0rhMzJOPh/8H4O/VGxOI56N/BJnP1C3UdXYMUtrx
+        +Rym4clNyyDyjFNNaeHGYv8CAwEAAQ==
+        -----END PUBLIC KEY-----
       S3_ENDPOINT_URL: http://localstack:4566
       S3_PRESIGN_ENDPOINT_URL: http://localhost:4566
     command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
@@ -113,8 +184,24 @@ services:
     environment:
       EXAM_SERVICE_URL: http://exam:8000
       QUESTION_SERVICE_URL: http://question:8000
-      JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-change-me-not-for-production-use}
-      REDIS_URL: redis://redis:6379/1
+      # Dev keypair, committed at infra/dev-keys/ (see infra/dev-keys/README.md).
+      # Verify-only: gateway never signs, so it gets the public key only.
+      RS256_PUBLIC_KEY: |
+        -----BEGIN PUBLIC KEY-----
+        MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAo7RuAmhHOn1auFLusl8s
+        sqOxZVBrSs2uvYXvn5rEv16PcnaWXRe48tX+qlHOi2h+Zqy/KXN+54uJiEoi3+s0
+        Z8/ZInuHo/FY32BhY77alFi+a8OApCCgpHn7yO8m5KXlrA2qErmK7EPmdoZLVX35
+        NkNgAfhQKMWnfjnVh6nhuy0dN9Z3H2siHbNlkQo8VGtwkXw0eRrrI6oKi2fezYj9
+        FvmpZDiAHpzCXfRDVk1nqZaLWqF0xQj+DIxgJHX70pbbHuvkw9duadkvfmZcrvfk
+        1L0fMQa03/gUijpJ/bny9IVEdut3nVjgjWvrnUvhfPVWq0rT90tD0X3sffckBOtu
+        AfOvqt4Q82yyny3i7nF+UNI/MIZBxjPn3+gjOAl1z8bZgIjoRAHDvAqoArbTW8Mi
+        5jkQlGx9jaBo0p7TPX0wa5Kdq2kkmwcqJ9GlKsx15Zu+LV4++1lMX9VTYiej48Gk
+        O0jIDHlTIUW6xUWr5gUTLFNOfdZYs9hiNKz2s5/ZPBJK0YAdyI+D9jDrU45w6Q/9
+        /1cgpIXIUY5R+O6n9YSio6YZY4QSD9rnnDsRseyDQui3hA4KXrViPgfRJ8hP9LSb
+        v2NN0tDoKScwpZ7Vh5Q7ABbo0rhMzJOPh/8H4O/VGxOI56N/BJnP1C3UdXYMUtrx
+        +Rym4clNyyDyjFNNaeHGYv8CAwEAAQ==
+        -----END PUBLIC KEY-----
+      REDIS_URL: redis://redis:6379/0
       CORS_ORIGINS: '["http://localhost:5173"]'
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     ports:

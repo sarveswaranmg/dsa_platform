@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["httpx>=0.27", "pyjwt>=2.9", "pyotp>=2.9"]
+# dependencies = ["httpx>=0.27", "pyjwt>=2.9", "pyotp>=2.9", "cryptography>=42"]
 # ///
 """End-to-end proof of the Phase 1 MVP.
 
@@ -33,16 +33,26 @@ import sys
 import time
 import uuid
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import httpx
 import jwt
 import pyotp
+from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
+from cryptography.hazmat.primitives.serialization import load_pem_private_key
 
 GATEWAY_URL = "http://localhost:8080"
 # S3 presigned uploads go straight to localstack, bypassing the API by design.
 S3_HOST = "http://localhost:4566"
-JWT_SECRET = "dev-jwt-secret-change-me-not-for-production-use"
+# Same dev keypair exam signs with (infra/dev-keys/README.md) — this script
+# stands in for the candidate's Google sign-in, so it must forge a token that
+# verifies the same way a real exam-issued one would.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_DEV_PRIVATE_KEY_PATH = _REPO_ROOT / "infra" / "dev-keys" / "rs256-private.pem"
+_dev_key = load_pem_private_key(_DEV_PRIVATE_KEY_PATH.read_bytes(), password=None)
+assert isinstance(_dev_key, RSAPrivateKey)
+DEV_PRIVATE_KEY: RSAPrivateKey = _dev_key
 PASSWORD = "correct-horse-battery-staple"
 VERDICT_TIMEOUT_S = 90
 
@@ -244,8 +254,8 @@ def candidate_token(exam: dict[str, str]) -> str:
             "iat": now,
             "exp": now + timedelta(hours=2),
         },
-        JWT_SECRET,
-        algorithm="HS256",
+        DEV_PRIVATE_KEY,
+        algorithm="RS256",
     )
     ok("exam-scoped candidate token obtained")
     return token

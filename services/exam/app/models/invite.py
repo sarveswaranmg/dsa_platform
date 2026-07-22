@@ -16,7 +16,7 @@ class InviteStatus(enum.StrEnum):
 
 class Invite(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """Durable record of an invite. Single-use is enforced atomically in Redis
-    (key invite:{jti}); this row is the audit trail the examiner sees."""
+    (key ex:invite:{jti}); this row is the audit trail the examiner sees."""
 
     __tablename__ = "invites"
 

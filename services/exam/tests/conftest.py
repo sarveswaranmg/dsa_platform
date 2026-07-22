@@ -1,6 +1,12 @@
+import os
 import uuid
 from collections.abc import AsyncIterator
 from pathlib import Path
+
+# Must run before any `app.*` import touches Settings: dev/test RS256 key,
+# committed at infra/dev-keys/ (see infra/dev-keys/README.md).
+_DEV_KEYS = Path(__file__).resolve().parents[3] / "infra" / "dev-keys"
+os.environ.setdefault("RS256_PRIVATE_KEY", (_DEV_KEYS / "rs256-private.pem").read_text())
 
 import pyotp
 import pytest

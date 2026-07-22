@@ -26,7 +26,7 @@ class RedisRateLimiter:
     async def check(self, identity: Identity, limit: int) -> int | None:
         window = get_settings().rate_limit_window_seconds
         bucket = int(time.time()) // window
-        key = f"rl:{identity}:{bucket}"
+        key = f"gw:rl:{identity}:{bucket}"
 
         count = await self._redis.incr(key)
         if count == 1:

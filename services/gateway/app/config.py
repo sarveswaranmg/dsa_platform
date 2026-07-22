@@ -12,7 +12,10 @@ class Settings(BaseSettings):
     exam_service_url: str = "http://localhost:8001"
     question_service_url: str = "http://localhost:8002"
 
-    jwt_secret: str = "dev-jwt-secret-change-me-not-for-production-use"
+    # RS256 public key (PEM) used to verify tokens exam signs. Gateway never
+    # holds a private key — see docs/architecture.md and the production
+    # readiness checklist in CLAUDE.md.
+    rs256_public_key: str
     redis_url: str = "redis://localhost:6379/0"
 
     cors_origins: list[str] = ["http://localhost:5173"]
@@ -29,4 +32,4 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    return Settings()  # type: ignore[call-arg]  # required fields come from env vars

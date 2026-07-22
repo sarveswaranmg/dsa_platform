@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from httpx import AsyncClient
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clients.question_service import PublishedQuestionRef, VersionContent
@@ -130,6 +131,23 @@ async def test_start_assigns_questions_and_sets_timer(
     assert [q["ordinal"] for q in body["questions"]] == [1, 2]
     assert all(q["question_version_id"] for q in body["questions"])  # versions pinned
     assert 0 < body["remaining_seconds"] <= 60 * 60
+
+
+async def test_start_mirrors_session_under_prefixed_redis_key(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fake_question_client: FakeQuestionClient,
+    redis_client: Redis,
+    org_id: uuid.UUID,
+) -> None:
+    exam = await _setup_exam(db_session, fake_question_client, org_id, question_count=1)
+    body = (
+        await client.post("/candidate/session/start", headers=_headers(exam))
+    ).json()
+
+    mirrored = await redis_client.get(f"ex:session:{body['id']}")
+    assert mirrored is not None
+    assert json.loads(mirrored)["status"] == SessionStatus.IN_PROGRESS.value
 
 
 async def test_start_before_window_rejected(

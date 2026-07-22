@@ -5,6 +5,7 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import EmailMismatch, EmailNotVerified, InviteInvalid
+from app.core.redis_keys import invite_key
 from app.core.security import create_candidate_exam_token, decode_invite_token
 from app.models.exam import Exam
 from app.models.invite import InviteStatus
@@ -41,7 +42,7 @@ async def exchange(
 
     # 3. Atomically consume the single-use token. A miss means it was already
     #    used or the window's TTL elapsed.
-    consumed = await redis.getdel(f"invite:{jti}")
+    consumed = await redis.getdel(invite_key(jti))
     if consumed is None:
         raise InviteInvalid()
 

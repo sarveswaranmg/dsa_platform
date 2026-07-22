@@ -6,9 +6,12 @@ filter and never the sole authority (architecture.md §6).
 """
 
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any
 
 import jwt
+from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
+from cryptography.hazmat.primitives.serialization import load_pem_public_key
 
 from app.config import get_settings
 from app.routing import Policy
@@ -39,12 +42,19 @@ class Identity:
         return f"{self.kind}:{self.value}"
 
 
+@lru_cache
+def _public_key() -> RSAPublicKey:
+    key = load_pem_public_key(get_settings().rs256_public_key.encode())
+    assert isinstance(key, RSAPublicKey)
+    return key
+
+
 def _decode(token: str) -> dict[str, Any]:
     try:
         payload: dict[str, Any] = jwt.decode(
             token,
-            get_settings().jwt_secret,
-            algorithms=["HS256"],
+            _public_key(),
+            algorithms=["RS256"],
             options={"require": ["sub", "type", "exp"]},
         )
     except jwt.PyJWTError as exc:

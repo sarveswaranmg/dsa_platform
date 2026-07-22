@@ -1,8 +1,11 @@
 import uuid
 from datetime import UTC, datetime, timedelta
+from urllib.parse import parse_qs, urlparse
 
 from httpx import AsyncClient
+from redis.asyncio import Redis
 
+from app.core.security import decode_invite_token
 from tests.conftest import FakeEmailSender, one_topic_blueprint
 
 
@@ -48,6 +51,25 @@ async def test_schedule_exam_happy(
     assert len(fake_email_sender.sent) == 1
     assert fake_email_sender.sent[0].to == "candidate@example.com"
     assert "token=" in fake_email_sender.sent[0].body
+
+
+async def test_schedule_writes_invite_under_prefixed_redis_key(
+    client: AsyncClient, author: dict[str, str], redis_client: Redis
+) -> None:
+    blueprint_id = await _create_blueprint(client, author)
+    response = await client.post(
+        "/exams",
+        headers=author,
+        json={
+            "candidate_email": "c@example.com",
+            "blueprint_id": blueprint_id,
+            **_window(),
+        },
+    )
+    token = parse_qs(urlparse(response.json()["invite_link"]).query)["token"][0]
+    jti = str(decode_invite_token(token)["jti"])
+
+    assert await redis_client.exists(f"ex:invite:{jti}")
 
 
 async def test_schedule_blueprint_not_found(
