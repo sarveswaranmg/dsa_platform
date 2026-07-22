@@ -1,5 +1,7 @@
 # DSA Exam Platform
 
+[![CI](https://github.com/sarveswaranmg/dsa_platform/actions/workflows/ci.yml/badge.svg)](https://github.com/sarveswaranmg/dsa_platform/actions/workflows/ci.yml)
+
 An invite-only, adaptive DSA (data-structures & algorithms) assessment
 platform. Examiners compose exams from a candidate's role and experience
 profile; each candidate gets an equivalent-but-non-identical question set;

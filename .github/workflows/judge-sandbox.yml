@@ -1,0 +1,66 @@
+name: Judge Sandbox
+
+# Deliberately NOT path-filtered at the trigger level: a workflow with a
+# `paths:` filter never posts a status for PRs outside that path, and a
+# required check that never posts a status blocks those PRs from merging
+# forever. Instead this always triggers and does the path check as the first
+# job step, so it can safely be a required check for every PR while only
+# doing real work when services/judge/** changed.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  sandbox-escape-suite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect judge changes
+        id: detect
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+          else
+            base="${{ github.event.before }}"
+          fi
+          if files=$(git diff --name-only "$base" "${{ github.sha }}" 2>/dev/null) \
+              && ! printf '%s\n' "$files" | grep -q '^services/judge/'; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            # Diff failed, or it touched services/judge/ — run the suite either way.
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: astral-sh/setup-uv@v5
+        if: steps.detect.outputs.changed == 'true'
+        with:
+          enable-cache: true
+          cache-dependency-glob: "services/judge/uv.lock"
+
+      - name: Build judge runner images
+        if: steps.detect.outputs.changed == 'true'
+        run: make judge-images
+
+      - name: Start localstack
+        if: steps.detect.outputs.changed == 'true'
+        run: docker compose -f infra/docker-compose.yml up -d --wait localstack
+
+      - name: Run sandbox-escape suite
+        if: steps.detect.outputs.changed == 'true'
+        working-directory: services/judge
+        run: |
+          set -euo pipefail
+          uv run pytest tests/test_security.py -v -rs | tee sandbox-output.log
+          if grep -q "SKIPPED" sandbox-output.log; then
+            echo "::error::Sandbox-escape suite reported skipped tests. This suite must never skip in CI (Docker must be available and every test must actually execute) — failing loudly instead of passing silently."
+            exit 1
+          fi
+
+      - name: Tear down infra
+        if: always() && steps.detect.outputs.changed == 'true'
+        run: docker compose -f infra/docker-compose.yml down -v
