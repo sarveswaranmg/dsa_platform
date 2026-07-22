@@ -1,10 +1,15 @@
 COMPOSE := docker compose -f infra/docker-compose.yml
 BACKEND_SERVICES := $(patsubst services/%/pyproject.toml,%,$(wildcard services/*/pyproject.toml))
 
-.PHONY: dev infra-up test lint migrate judge-images
+.PHONY: dev infra-up test lint migrate judge-images e2e
 
 dev:
 	$(COMPOSE) up --build
+
+# Full-MVP proof through the gateway. Needs `make dev` up and the judge worker
+# running (cd services/judge && uv run python -m app.worker).
+e2e:
+	uv run scripts/e2e.py
 
 # Build the per-language sandbox runner images the judge launches.
 judge-images:
