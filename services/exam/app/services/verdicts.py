@@ -10,6 +10,7 @@ import logging
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.logging import set_request_id
 from app.messaging.contracts import VerdictMessage, VerdictStatus
 from app.models.submission import SubmissionStatus
 from app.repositories import submissions as submissions_repo
@@ -25,6 +26,10 @@ _TERMINAL = {
 
 async def process_verdict_message(session: AsyncSession, body: str) -> None:
     message = VerdictMessage.model_validate_json(body)
+    if message.request_id:
+        # Re-bind the originating trace id so this persist log line joins the
+        # gateway/exam/judge lines for the same submission.
+        set_request_id(message.request_id)
     submission = await submissions_repo.get_by_id_unscoped(
         session, submission_id=message.submission_id
     )

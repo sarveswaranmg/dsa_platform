@@ -52,8 +52,10 @@ services:
       FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-http://localhost:5173}
       SQS_ENDPOINT_URL: http://localstack:4566
     command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
-    ports:
-      - "8001:8000"
+    # No host port: reachable only through the gateway (keeps the
+    # unauthenticated internal endpoints off the host).
+    expose:
+      - "8000"
     volumes:
       - ../services/exam/app:/service/app
       - ../services/exam/alembic:/service/alembic
@@ -71,8 +73,10 @@ services:
       S3_ENDPOINT_URL: http://localstack:4566
       S3_PRESIGN_ENDPOINT_URL: http://localhost:4566
     command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
-    ports:
-      - "8002:8000"
+    # No host port: the unauthenticated /internal endpoints are reachable only
+    # on the compose network, never from the host.
+    expose:
+      - "8000"
     volumes:
       - ../services/question/app:/service/app
       - ../services/question/alembic:/service/alembic
@@ -103,13 +107,35 @@ services:
       localstack:
         condition: service_healthy
 
-  # Candidate exam UI (Vite dev server). Slice 9 will repoint the proxy at
-  # the gateway; for now it proxies /candidate straight to the exam service.
+  # Edge gateway: the only published entry point for the two API services.
+  gateway:
+    build: ../services/gateway
+    environment:
+      EXAM_SERVICE_URL: http://exam:8000
+      QUESTION_SERVICE_URL: http://question:8000
+      JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-change-me-not-for-production-use}
+      REDIS_URL: redis://redis:6379/1
+      CORS_ORIGINS: '["http://localhost:5173"]'
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8080:8000"
+    volumes:
+      - ../services/gateway/app:/service/app
+    depends_on:
+      redis:
+        condition: service_healthy
+      exam:
+        condition: service_started
+      question:
+        condition: service_started
+
+  # Candidate exam UI (Vite dev server). Talks only to the gateway.
   frontend:
     image: node:20-slim
     working_dir: /app
     environment:
-      VITE_API_TARGET: http://exam:8000
+      VITE_API_TARGET: http://gateway:8000
+      VITE_QUESTION_TARGET: http://gateway:8000
       VITE_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
     command: sh -c "npm install && npm run dev"
     ports:
@@ -118,7 +144,7 @@ services:
       - ../frontend:/app
       - /app/node_modules
     depends_on:
-      - exam
+      - gateway
 
 volumes:
   postgres-data:

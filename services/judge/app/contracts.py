@@ -55,6 +55,8 @@ class SubmissionJob(BaseModel):
     compare_mode: CompareMode = CompareMode.WHITESPACE
     limits: Limits
     cases: list[TestCaseRef]
+    # Trace id from the originating HTTP request, so judge logs correlate.
+    request_id: str | None = None
 
 
 class CaseResult(BaseModel):
@@ -76,3 +78,4 @@ class VerdictMessage(BaseModel):
     summary_verdict: Verdict
     compile_error: str | None = None
     cases: list[CaseResult]
+    request_id: str | None = None  # carried back so the persist log matches

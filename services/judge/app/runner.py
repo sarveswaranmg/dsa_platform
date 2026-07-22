@@ -163,6 +163,7 @@ def run(job: SubmissionJob) -> VerdictMessage:
                 summary_verdict=Verdict.CE,
                 compile_error=compile_out.compile_log[:4000] or "compilation failed",
                 cases=[],
+                request_id=job.request_id,
             )
 
         # --- run stage: one container per test case ---
@@ -200,6 +201,7 @@ def run(job: SubmissionJob) -> VerdictMessage:
             summary_verdict=_summary(results),
             compile_error=None,
             cases=results,
+            request_id=job.request_id,
         )
     finally:
         shutil.rmtree(workdir, ignore_errors=True)

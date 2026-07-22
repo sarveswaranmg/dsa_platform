@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.clients.question_service import QuestionServiceClient
 from app.core.config import get_settings
 from app.core.exceptions import NotFound
+from app.core.logging import current_request_id
 from app.messaging.contracts import JobLimits, SubmissionJob, TestCaseRef
 from app.messaging.sqs import QueuePublisher
 from app.models.case_verdict import CaseVerdict
@@ -76,6 +77,7 @@ async def create_and_enqueue(
             )
             for k in keys
         ],
+        request_id=current_request_id(),  # trace across the queue into the judge
     )
     publisher.send(get_settings().submissions_queue, job.model_dump_json())
     return submission

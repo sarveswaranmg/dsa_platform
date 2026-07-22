@@ -7,12 +7,14 @@ boundary (dedupe on submission_id), so a redelivered job is harmless.
 """
 
 import logging
+import uuid
 
 from pydantic import ValidationError
 
 from app import sqs
 from app.config import get_settings
 from app.contracts import SubmissionJob
+from app.logging import set_request_id
 from app.runner import run
 
 logger = logging.getLogger("judge.worker")
@@ -24,6 +26,9 @@ def process_message(body: str) -> None:
     except ValidationError:
         logger.exception("dropping unparseable submission job")
         return
+    # Bind the originating request id (falling back to a fresh one) so every
+    # judge log line for this submission carries the same trace.
+    set_request_id(job.request_id or str(uuid.uuid4()))
     logger.info("judging submission %s (%s)", job.submission_id, job.language)
     verdict = run(job)
     settings = get_settings()
@@ -49,5 +54,7 @@ def run_forever() -> None:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
+    from app.logging import configure_logging
+
+    configure_logging("judge")
     run_forever()

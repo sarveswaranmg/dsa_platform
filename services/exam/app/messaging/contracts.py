@@ -31,6 +31,7 @@ class SubmissionJob(BaseModel):
     compare_mode: str
     limits: JobLimits
     cases: list[TestCaseRef]
+    request_id: str | None = None
 
 
 class CaseResult(BaseModel):
@@ -52,3 +53,4 @@ class VerdictMessage(BaseModel):
     summary_verdict: str
     compile_error: str | None = None
     cases: list[CaseResult]
+    request_id: str | None = None
