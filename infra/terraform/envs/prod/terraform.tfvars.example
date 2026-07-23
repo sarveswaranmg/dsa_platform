@@ -1,0 +1,24 @@
+# Copy to terraform.tfvars and fill in. Never commit terraform.tfvars itself
+# if it ever contains anything sensitive (it shouldn't, given the design —
+# real secrets live in Secrets Manager, populated post-apply, never here).
+
+aws_region = "us-east-1"
+
+github_org  = "your-github-org"
+github_repo = "dsa_platform"
+
+ses_from_address = "no-reply@yourdomain.com"
+
+# Leave both empty to run HTTP-only with no domain (see README). Fill in
+# once you own a domain and its zone is delegated to Route53.
+domain_name     = ""
+route53_zone_id = ""
+
+# Sizing — defaults are fine to start; tune once you have real traffic.
+gateway_desired_count  = 2
+exam_desired_count     = 2
+question_desired_count = 2
+judge_min_size         = 1
+judge_max_size         = 10
+judge_desired_capacity = 2
+judge_runtime          = "runc" # "gvisor" once your judge AMI has it installed
