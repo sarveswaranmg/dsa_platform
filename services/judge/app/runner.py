@@ -128,6 +128,7 @@ def _summary(cases: list[CaseResult]) -> Verdict:
 
 def run(job: SubmissionJob) -> VerdictMessage:
     settings = get_settings()
+    runtime = "runsc" if settings.judge_runtime == "gvisor" else "runc"
     os.makedirs(settings.scratch_root, exist_ok=True)
     workdir = tempfile.mkdtemp(prefix=f"{job.submission_id.hex}-", dir=settings.scratch_root)
     # World-accessible so uid 1000 inside the container can read/write during
@@ -151,6 +152,7 @@ def run(job: SubmissionJob) -> VerdictMessage:
             name=_name(job.submission_id, "compile"),
             writable_artifact=True,
             output_bytes=job.limits.output_bytes,
+            runtime=runtime,
         )
         compile_out = _run_container(
             compile_spec, stdin=b"", wall_seconds=settings.wall_grace_seconds + 20
@@ -182,6 +184,7 @@ def run(job: SubmissionJob) -> VerdictMessage:
                 writable_artifact=False,
                 output_bytes=job.limits.output_bytes,
                 env={"MAX_OUTPUT_BYTES": str(job.limits.output_bytes)},
+                runtime=runtime,
             )
             outcome = _run_container(run_spec, stdin=stdin, wall_seconds=wall_seconds)
             case_result = _verdict_for_case(outcome, expected, job)

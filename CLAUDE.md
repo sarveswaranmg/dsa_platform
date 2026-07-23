@@ -56,6 +56,12 @@ docs/                # architecture.md, DECISIONS.md, design notes
 - `make test SVC=exam` — run one service's tests
 - `make lint` — ruff + mypy (backend), eslint + tsc (frontend)
 - `make migrate SVC=exam MSG="..."` — autogenerate an Alembic migration
+- `make migrate-run` — apply pending migrations via each service's one-shot
+  migrate container (exam, question); `make dev` also runs this
+  automatically before the app containers start
+- `make build-frontend` — build the production frontend image (`npm run
+  build`, served via nginx); override the gateway origin with
+  `VITE_API_BASE_URL=...`
 
 Run `make test` and `make lint` after every change set, and fix failures
 before presenting the diff.
@@ -84,7 +90,16 @@ readiness checklist is cleared.
       tokens, which it shouldn't be able to do)
 - [ ] Judge isolation: dedicated node pool (MVP) → gVisor (`--runtime=runsc`)
       → Firecracker (stretch). Never co-tenant judge workers with other services.
-- [ ] Frontend: `npm run build` → S3/CloudFront (Vite dev server is dev-only)
+- [ ] Frontend: `npm run build` → S3/CloudFront (Vite dev server is dev-only).
+      A Docker/nginx build already exists (`frontend/Dockerfile`, `make
+      build-frontend`, `infra/docker-compose.prod.yml`) as an interim/local
+      "prod-like" option — nginx proxies API paths same-origin, so
+      `VITE_API_BASE_URL` is a Docker build-arg baked into nginx's config,
+      not into the JS bundle. `VITE_API_BASE_URL` must be set at build time
+      in CI/CD (per environment) for either path; the eventual direct
+      S3/CloudFront static hosting has no proxy layer, so that path will
+      need `VITE_API_BASE_URL` baked into the JS bundle instead (not yet
+      wired — `frontend/src` makes only same-origin relative fetches today).
 - [ ] SES implementation behind existing `EmailSender` protocol
 - [ ] Real Google OIDC client + authorized redirect URIs for the real domain
 - [ ] TLS terminated at the load balancer (everything is plain HTTP today)

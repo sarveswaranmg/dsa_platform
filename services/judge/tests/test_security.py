@@ -11,6 +11,7 @@ import uuid
 
 import pytest
 
+from app.config import get_settings
 from app.contracts import Language, Limits, SubmissionJob, TestCaseRef, Verdict
 from app.runner import run
 from tests.conftest import _Uploader
@@ -112,3 +113,24 @@ def test_huge_stdout_is_capped(upload_case: _Uploader) -> None:
     src = "import sys\nwhile True:\n    sys.stdout.write('A' * 1_000_000)\n"
     result = run(_job(src, _one_case(upload_case), output_bytes=1_000_000))
     assert result.cases[0].verdict in {Verdict.RE, Verdict.WA}
+
+
+@pytest.mark.usefixtures("runsc_or_skip")
+def test_escape_suite_passes_under_gvisor_runtime(
+    monkeypatch: pytest.MonkeyPatch, upload_case: _Uploader
+) -> None:
+    """Re-runs the sandbox-escape suite with JUDGE_RUNTIME=gvisor to prove the
+    containment guarantees hold under gVisor too, not just runc."""
+    monkeypatch.setenv("JUDGE_RUNTIME", "gvisor")
+    get_settings.cache_clear()
+    try:
+        test_fork_bomb_is_contained(upload_case)
+        test_rootfs_write_blocked(upload_case)
+        test_artifact_mount_is_read_only(upload_case)
+        test_tmpfs_is_noexec(upload_case)
+        test_network_egress_blocked(upload_case)
+        test_no_secret_env_leak(upload_case)
+        test_docker_socket_absent(upload_case)
+        test_huge_stdout_is_capped(upload_case)
+    finally:
+        get_settings.cache_clear()

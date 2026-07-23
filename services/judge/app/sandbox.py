@@ -36,6 +36,7 @@ class SandboxSpec:
     output_bytes: int = 1_000_000
     writable_artifact: bool = False  # True only for the compile stage
     env: dict[str, str] = field(default_factory=dict)
+    runtime: str = "runc"  # "runc" (default) or "runsc" (gVisor)
 
 
 def build_run_command(spec: SandboxSpec) -> list[str]:
@@ -64,6 +65,10 @@ def build_run_command(spec: SandboxSpec) -> list[str]:
         f"{spec.artifact_dir}:{ARTIFACT_DIR}:{mount_mode}",
         "--workdir",
         WORK_DIR,
+    ]
+    if spec.runtime != "runc":
+        cmd += ["--runtime", spec.runtime]
+    cmd += [
         # --- privilege ---
         "--user",
         "1000:1000",  # non-root (also baked into the image)

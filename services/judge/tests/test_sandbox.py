@@ -75,3 +75,13 @@ def test_only_one_mount() -> None:
 def test_memory_swap_always_equals_memory() -> None:
     cmd = build_run_command(_spec(memory_mb=512))
     assert _flag_value(cmd, "--memory") == _flag_value(cmd, "--memory-swap") == "512m"
+
+
+def test_runtime_flag_present_for_gvisor() -> None:
+    cmd = build_run_command(_spec(runtime="runsc"))
+    assert "--runtime" in cmd and _flag_value(cmd, "--runtime") == "runsc"
+
+
+def test_runtime_flag_absent_by_default() -> None:
+    cmd = build_run_command(_spec())
+    assert "--runtime" not in cmd

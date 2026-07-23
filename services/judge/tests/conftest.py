@@ -23,6 +23,21 @@ def docker_or_skip() -> None:
         pytest.skip("docker socket not available")
 
 
+def _runsc_registered() -> bool:
+    if not _docker_available():
+        return False
+    result = subprocess.run(
+        ["docker", "info", "--format", "{{json .Runtimes}}"], capture_output=True
+    )
+    return result.returncode == 0 and b'"runsc"' in result.stdout
+
+
+@pytest.fixture(scope="session")
+def runsc_or_skip() -> None:
+    if not _runsc_registered():
+        pytest.skip("gVisor (runsc) runtime not registered with the local Docker daemon")
+
+
 @pytest.fixture(scope="session")
 def s3_bucket() -> None:
     settings = get_settings()

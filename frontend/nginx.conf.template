@@ -1,0 +1,31 @@
+server {
+    listen 80;
+    server_name _;
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # Docker's embedded DNS resolver. Needed so proxy_pass resolves the
+    # upstream host at request time via a variable, not once at nginx
+    # startup — a literal proxy_pass target is resolved eagerly, and nginx
+    # refuses to start at all if that host isn't resolvable yet (a real
+    # startup-ordering / restart risk against the gateway container).
+    resolver 127.0.0.11 valid=30s;
+
+    # Mirrors vite.config.ts's dev-server proxy list exactly, so dev and
+    # prod routing stay in lockstep. VITE_API_BASE_URL is substituted into
+    # this file at image-build time (see Dockerfile) — not baked into the
+    # JS bundle, since the app only ever makes same-origin relative fetches.
+    location ~ ^/(candidate|auth|examiners|blueprints|exams|submissions|topics|questions) {
+        set $upstream ${VITE_API_BASE_URL};
+        proxy_pass $upstream;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # SPA fallback for react-router-dom client-side routes.
+    location / {
+        try_files $uri /index.html;
+    }
+}

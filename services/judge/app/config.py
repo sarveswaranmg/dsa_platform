@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     image_java: str = "dsa-judge-java:21"
     image_cpp: str = "dsa-judge-cpp:13"
 
+    # Docker runtime for sandboxed containers: "runc" (default) or "gvisor"
+    # (maps to --runtime=runsc). See docs/DECISIONS.md.
+    judge_runtime: str = "runc"
+
     # Scratch root on the judge host for per-submission artifact dirs.
     scratch_root: str = "/tmp/dsa-judge"
 

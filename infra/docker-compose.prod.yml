@@ -1,0 +1,24 @@
+# Override for a "prod-like" frontend: replaces the dev Vite server with the
+# built static bundle served by nginx (frontend/Dockerfile). Use alongside
+# the base file:
+#
+#   docker compose -f infra/docker-compose.yml -f infra/docker-compose.prod.yml up --build frontend
+#
+# Note: Compose merges list/map fields (volumes, ports, environment) from
+# both files by union, not replace — so the base `frontend` service's dev
+# bind mounts, its 5173:5173 port, and its Vite-only env vars are still
+# technically present in the merged config. They're inert here (nginx never
+# reads them, the dead port mapping just goes nowhere), not worth fighting
+# with version-dependent override tricks for a local/dev-adjacent file. The
+# one field that MUST be cleared is `command` (below), since an inherited
+# command would override this image's own nginx CMD.
+services:
+  frontend:
+    image: dsa-platform-frontend:prod
+    build:
+      context: ../frontend
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://gateway:8000}
+    command: null
+    ports:
+      - "8081:80"

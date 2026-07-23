@@ -1,7 +1,8 @@
 COMPOSE := docker compose -f infra/docker-compose.yml
 BACKEND_SERVICES := $(patsubst services/%/pyproject.toml,%,$(wildcard services/*/pyproject.toml))
+VITE_API_BASE_URL ?= http://gateway:8000
 
-.PHONY: dev infra-up test lint migrate judge-images e2e
+.PHONY: dev infra-up test lint migrate migrate-run judge-images e2e build-frontend
 
 dev:
 	$(COMPOSE) up --build
@@ -51,3 +52,18 @@ ifndef MSG
 	$(error Usage: make migrate SVC=<service> MSG="<message>")
 endif
 	cd services/$(SVC) && uv run alembic revision --autogenerate -m "$(MSG)"
+
+# Applies pending migrations by running each service's one-shot migrate
+# container to completion (exam, question — the only services with a
+# database). Not to be confused with `migrate`, which authors a new
+# migration file. `make dev` also runs these automatically before the app
+# containers start (see infra/docker-compose.yml's service_completed_successfully
+# dependency); this target is for running migrations standalone.
+migrate-run: infra-up
+	$(COMPOSE) run --rm exam-migrate
+	$(COMPOSE) run --rm question-migrate
+
+# Builds the production frontend image (npm run build, served via nginx).
+# Override the gateway origin with: make build-frontend VITE_API_BASE_URL=https://api.example.com
+build-frontend:
+	docker build -t dsa-platform-frontend:prod --build-arg VITE_API_BASE_URL=$(VITE_API_BASE_URL) frontend
