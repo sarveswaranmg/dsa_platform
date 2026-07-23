@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from typing import Protocol
 
+from app.core.config import get_settings
+
 
 @dataclass(frozen=True)
 class EmailMessage:
@@ -30,4 +32,11 @@ class ConsoleEmailSender:
 
 def get_email_sender() -> EmailSender:
     # FastAPI dependency; overridden in tests to capture sent messages.
-    return ConsoleEmailSender()
+    backend = get_settings().email_backend
+    if backend == "console":
+        return ConsoleEmailSender()
+    if backend == "ses":
+        from app.notifications.ses_sender import SesEmailSender
+
+        return SesEmailSender()
+    raise ValueError(f"Unknown EMAIL_BACKEND: {backend!r}")

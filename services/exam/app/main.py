@@ -15,7 +15,7 @@ from app.api.routes import (
     health,
     results,
 )
-from app.core.config import get_settings
+from app.core.config import get_settings, validate_production_config
 from app.core.exceptions import DomainError
 from app.core.logging import RequestIdMiddleware, configure_logging
 from app.core.redis import close_redis
@@ -26,6 +26,7 @@ from app.messaging.consumer import run_verdict_consumer
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     configure_logging("exam")
+    validate_production_config(get_settings())
     stop = asyncio.Event()
     consumer_task: asyncio.Task[None] | None = None
     if get_settings().enable_verdict_consumer:

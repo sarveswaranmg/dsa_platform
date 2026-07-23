@@ -142,9 +142,19 @@ services:
       # key only (below).
       RS256_PRIVATE_KEY: *rs256-private-key
       QUESTION_SERVICE_URL: http://question:8000
+      # Google Cloud Console → APIs & Services → Credentials → OAuth 2.0
+      # Client IDs (console.cloud.google.com/apis/credentials). Placeholders
+      # below are dev-only; ENV=production requires all three to be real and
+      # non-empty (see validate_production_config in app/core/config.py).
+      # CLIENT_SECRET and REDIRECT_URI aren't consumed by the current
+      # client-side Google Identity Services flow (docs/architecture.md) —
+      # reserved for a future server-side flow.
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-dev-google-client-id.apps.googleusercontent.com}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-dev-google-client-secret}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-http://localhost:5173/invite}
       FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-http://localhost:5173}
       SQS_ENDPOINT_URL: http://localstack:4566
+      EMAIL_BACKEND: console
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     # No host port: reachable only through the gateway (keeps the
     # unauthenticated internal endpoints off the host).

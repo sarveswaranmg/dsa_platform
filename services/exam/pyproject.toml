@@ -29,7 +29,7 @@ dev = [
     "httpx>=0.27",
     "ruff>=0.6",
     "mypy>=1.11",
-    "boto3-stubs[sqs]>=1.34",
+    "boto3-stubs[sqs,ses]>=1.34",
 ]
 
 [tool.uv]
@@ -40,6 +40,9 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
+markers = [
+    "integration: hits a real external service (e.g. AWS SES); env-gated, normally skipped",
+]
 
 [tool.ruff]
 target-version = "py312"

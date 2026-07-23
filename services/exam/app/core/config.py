@@ -33,13 +33,39 @@ class Settings(BaseSettings):
     # tests leave it off and call process_verdict_message directly.
     enable_verdict_consumer: bool = True
 
-    # Candidate invite flow.
-    google_client_id: str = "dev-google-client-id.apps.googleusercontent.com"
-    google_client_secret: str = "dev-google-client-secret"
+    # Candidate invite flow. Empty by default (not a fake-looking placeholder)
+    # so validate_production_config can detect "not configured" cleanly.
+    # google_client_id is the only one actually read by the current
+    # client-side Google Identity Services flow (app/oidc/google.py) — the
+    # other two aren't consumed by any code path today; they're validated in
+    # production per CLAUDE.md's checklist and reserved for a future
+    # server-side flow.
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    google_redirect_uri: str = ""
     frontend_base_url: str = "http://localhost:5173"
-    email_backend: str = "console"  # console | (ses later)
+    email_backend: str = "console"  # console | ses
+    ses_from_address: str = "no-reply@example.com"  # must be an SES-verified identity in prod
 
 
 @lru_cache
 def get_settings() -> Settings:
     return Settings()  # type: ignore[call-arg]  # required fields come from env vars
+
+
+def validate_production_config(settings: Settings) -> None:
+    if settings.env != "production":
+        return
+    missing = [
+        name
+        for name, value in (
+            ("GOOGLE_CLIENT_ID", settings.google_client_id),
+            ("GOOGLE_CLIENT_SECRET", settings.google_client_secret),
+            ("GOOGLE_REDIRECT_URI", settings.google_redirect_uri),
+        )
+        if not value
+    ]
+    if missing:
+        raise RuntimeError(
+            f"ENV=production is set but missing required config: {', '.join(missing)}"
+        )
