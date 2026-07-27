@@ -151,8 +151,8 @@ services:
       # reserved for a future server-side flow.
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-dev-google-client-id.apps.googleusercontent.com}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-dev-google-client-secret}
-      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-http://localhost:5173/invite}
-      FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-http://localhost:5173}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-http://localhost:5174/invite}
+      FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-http://localhost:5174}
       SQS_ENDPOINT_URL: http://localstack:4566
       EMAIL_BACKEND: console
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
@@ -210,6 +210,48 @@ services:
       localstack:
         condition: service_healthy
 
+  # One-shot migration task — see exam-migrate above for the rationale.
+  ai-migrate:
+    build: ../services/ai
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-dsa}:${POSTGRES_PASSWORD:-dsa}@postgres:5432/ai
+      RS256_PUBLIC_KEY: *rs256-public-key
+    command: ["./migrate.sh"]
+    volumes:
+      - ../services/ai/app:/service/app
+      - ../services/ai/alembic:/service/alembic
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  ai:
+    build: ../services/ai
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-dsa}:${POSTGRES_PASSWORD:-dsa}@postgres:5432/ai
+      # Dev keypair, committed at infra/dev-keys/ (see infra/dev-keys/README.md).
+      # Verify-only: ai never signs, so it gets the public key only.
+      RS256_PUBLIC_KEY: *rs256-public-key
+      S3_ENDPOINT_URL: http://localstack:4566
+      S3_PRESIGN_ENDPOINT_URL: http://localhost:4566
+      # Mock by default — no Anthropic key or GitHub token required in dev.
+      LLM_BACKEND: ${LLM_BACKEND:-mock}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GITHUB_BACKEND: ${GITHUB_BACKEND:-mock}
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    # No host port: reachable only through the gateway.
+    expose:
+      - "8000"
+    volumes:
+      - ../services/ai/app:/service/app
+      - ../services/ai/alembic:/service/alembic
+    depends_on:
+      ai-migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+
   # Judge worker: consumes submission jobs and launches sibling runner
   # containers via the mounted Docker socket (DooD). It runs untrusted code
   # only inside those locked-down siblings, never in this container.
@@ -240,11 +282,12 @@ services:
     environment:
       EXAM_SERVICE_URL: http://exam:8000
       QUESTION_SERVICE_URL: http://question:8000
+      AI_SERVICE_URL: http://ai:8000
       # Dev keypair, committed at infra/dev-keys/ (see infra/dev-keys/README.md).
       # Verify-only: gateway never signs, so it gets the public key only.
       RS256_PUBLIC_KEY: *rs256-public-key
       REDIS_URL: redis://redis:6379/0
-      CORS_ORIGINS: '["http://localhost:5173"]'
+      CORS_ORIGINS: '["http://localhost:5174"]'
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     ports:
       - "8080:8000"
@@ -257,6 +300,8 @@ services:
         condition: service_started
       question:
         condition: service_started
+      ai:
+        condition: service_started
 
   # Candidate exam UI (Vite dev server). Talks only to the gateway.
   frontend:
@@ -268,7 +313,7 @@ services:
       VITE_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
     command: sh -c "npm install && npm run dev"
     ports:
-      - "5173:5173"
+      - "5174:5174"
     volumes:
       - ../frontend:/app
       - /app/node_modules

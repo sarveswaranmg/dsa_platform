@@ -44,6 +44,7 @@ class HttpForwarder:
         return {
             Upstream.EXAM: settings.exam_service_url,
             Upstream.QUESTION: settings.question_service_url,
+            Upstream.AI: settings.ai_service_url,
         }[upstream]
 
     async def forward(

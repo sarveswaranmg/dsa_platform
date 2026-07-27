@@ -7,6 +7,10 @@ import {
 import { ApiError } from '../client'
 import type { TokenResponse } from './types'
 
+// See ../client.ts — empty by default, only set at build time for the
+// S3/CloudFront deploy.
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? ''
+
 interface RequestOptions {
   method?: 'GET' | 'POST' | 'PATCH' | 'DELETE'
   body?: unknown
@@ -27,7 +31,7 @@ async function refreshAccessToken(): Promise<boolean> {
   const refreshToken = getRefreshToken()
   if (!refreshToken) return false
 
-  const response = await fetch('/auth/refresh', {
+  const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ refresh_token: refreshToken }),
@@ -56,7 +60,7 @@ async function send(path: string, options: RequestOptions): Promise<Response> {
     const token = getAccessToken()
     if (token) headers.Authorization = `Bearer ${token}`
   }
-  return fetch(path, {
+  return fetch(`${API_BASE_URL}${path}`, {
     method: options.method ?? 'GET',
     headers,
     body: options.body === undefined ? undefined : JSON.stringify(options.body),

@@ -8,7 +8,7 @@ const GATEWAY_TARGET = process.env.VITE_API_TARGET ?? 'http://localhost:8080'
 export default defineConfig({
   plugins: [react()],
   server: {
-    port: 5173,
+    port: 5174,
     // Dev proxy so the browser needs no CORS setup. The gateway owns routing,
     // auth-plane checks, and rate limiting behind this single target.
     proxy: Object.fromEntries(

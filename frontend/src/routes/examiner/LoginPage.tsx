@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 
 import { ApiError } from '../../api/client'
 import { useExaminerAuth } from '../../auth/useExaminerAuth'
@@ -78,6 +78,9 @@ export function LoginPage() {
           </p>
         )}
       </form>
+      <p>
+        No account yet? <Link to="/console/register">Create your organization</Link>
+      </p>
     </main>
   )
 }

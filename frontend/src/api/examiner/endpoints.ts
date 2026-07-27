@@ -8,6 +8,8 @@ import type {
   Question,
   QuestionListItem,
   QuestionPayload,
+  RegisterPayload,
+  RegisterResponse,
   SubmissionDetail,
   SubmissionSummary,
   TestCaseCreated,
@@ -17,6 +19,26 @@ import type {
 } from './types'
 
 // --- auth (exam service) ---
+
+export function registerOrg(payload: RegisterPayload): Promise<RegisterResponse> {
+  return examinerFetch<RegisterResponse>('/auth/register', {
+    method: 'POST',
+    anonymous: true,
+    body: payload,
+  })
+}
+
+export function verifyTotpEnrollment(
+  email: string,
+  password: string,
+  code: string,
+): Promise<void> {
+  return examinerFetch<void>('/auth/totp/verify', {
+    method: 'POST',
+    anonymous: true,
+    body: { email, password, code },
+  })
+}
 
 export function login(
   email: string,

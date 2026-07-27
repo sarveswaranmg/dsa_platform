@@ -9,6 +9,36 @@
   </head>
   <body>
     <div id="root"></div>
+    <script type="module">
+      // Dev-only: unregister any existing service workers and clear caches
+      // to avoid stale assets / mismatched HMR/runtime during local dev.
+      if (import.meta.env.DEV) {
+        if ("serviceWorker" in navigator) {
+          navigator.serviceWorker
+            .getRegistrations()
+            .then((regs) => {
+              regs.forEach((r) => {
+                console.log("Unregistering service worker:", r);
+                try {
+                  r.unregister();
+                } catch (e) {
+                  /* ignore */
+                }
+              });
+            })
+            .catch(() => {});
+        }
+        if ("caches" in window) {
+          caches
+            .keys()
+            .then((keys) => Promise.all(keys.map((k) => caches.delete(k))))
+            .then(() => {
+              console.log("Dev: cleared caches");
+            })
+            .catch(() => {});
+        }
+      }
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

@@ -331,9 +331,9 @@ module "github_oidc" {
     module.ecs_service_exam.service_arn,
     module.ecs_service_question.service_arn,
   ]
-  ecs_task_definition_arns = [
-    module.ecs_migrate_exam.task_definition_arn,
-    module.ecs_migrate_question.task_definition_arn,
+  migrate_task_definition_families = [
+    module.ecs_migrate_exam.task_definition_family,
+    module.ecs_migrate_question.task_definition_family,
   ]
   passable_role_arns = [
     module.ecs_service_gateway.task_role_arn,

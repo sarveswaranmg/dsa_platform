@@ -49,7 +49,7 @@ proctoring, mid-exam follow-ups) is designed for but not built — see
 ```mermaid
 flowchart TB
     subgraph client [Browser]
-        FE["React SPA :5173<br/>candidate room + examiner console"]
+        FE["React SPA :5174<br/>candidate room + examiner console"]
     end
 
     GW["API gateway :8080<br/>routing · JWT plane check · rate limit · CORS · request-id"]
@@ -124,7 +124,7 @@ Prerequisites: Docker Desktop, [`uv`](https://docs.astral.sh/uv/), Node 20.
 # 1. Build the sandbox runner images (once)
 make judge-images
 
-# 2. Bring up the whole stack (gateway :8080, frontend :5173, data services)
+# 2. Bring up the whole stack (gateway :8080, frontend :5174, data services)
 make dev
 
 # 3. Start the judge worker.
@@ -133,7 +133,7 @@ make dev
 cd services/judge && uv run python -m app.worker
 ```
 
-Only the **gateway (:8080)** and the **frontend (:5173)** are published; the
+Only the **gateway (:8080)** and the **frontend (:5174)** are published; the
 exam and question services are reachable only on the compose network (which is
 what keeps their unauthenticated `/internal` service-to-service endpoints off
 the host).

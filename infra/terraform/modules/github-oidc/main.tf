@@ -46,6 +46,20 @@ resource "aws_iam_role" "this" {
   tags               = var.tags
 }
 
+data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
+
+locals {
+  # Family-wildcard ARNs, not the exact ARN Terraform's initial `apply`
+  # happened to create (that pins to revision 1 — deploy.yml registers a
+  # new revision on every deploy, so RunTask needs to match ALL revisions
+  # of the family, not just the one that existed when `terraform apply` ran).
+  migrate_task_definition_arn_patterns = [
+    for family in var.migrate_task_definition_families :
+    "arn:aws:ecs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:task-definition/${family}:*"
+  ]
+}
+
 data "aws_iam_policy_document" "deploy" {
   statement {
     sid       = "EcrAuth"
@@ -76,7 +90,7 @@ data "aws_iam_policy_document" "deploy" {
   statement {
     sid       = "EcsRunMigrateTask"
     actions   = ["ecs:RunTask"]
-    resources = var.ecs_task_definition_arns
+    resources = local.migrate_task_definition_arn_patterns
     condition {
       test     = "ArnEquals"
       variable = "ecs:cluster"

@@ -8,7 +8,7 @@ server-synced countdown).
 
 ```bash
 npm install
-npm run dev            # http://localhost:5173, proxies /candidate → :8001
+npm run dev            # http://localhost:5174, proxies /candidate → :8001
 npm test               # Vitest + React Testing Library
 npm run lint           # eslint
 npx tsc --noEmit       # type check
@@ -24,7 +24,7 @@ the invited address — **there is no dev bypass anywhere**. To exercise the
 sign-in leg locally you need your own OAuth client:
 
 1. Create an OAuth 2.0 Web client in Google Cloud Console.
-2. Add `http://localhost:5173` as an authorised JavaScript origin.
+2. Add `http://localhost:5174` as an authorised JavaScript origin.
 3. Set the client id in both places:
 
 ```bash

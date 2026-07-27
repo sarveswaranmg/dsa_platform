@@ -1,5 +1,10 @@
 import { getExamToken } from '../auth/examToken'
 
+// Same-origin relative paths work unmodified for local dev and the
+// nginx-proxied Docker build (frontend/Dockerfile). Only set at build time
+// for the S3/CloudFront deploy, which has no server-side proxy layer.
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? ''
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -33,7 +38,7 @@ export async function apiFetch<T>(
     if (token) headers.Authorization = `Bearer ${token}`
   }
 
-  const response = await fetch(path, {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
     method,
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),

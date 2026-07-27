@@ -1,250 +1,343 @@
-DSA Exam Platform — Architecture Reference
+# DSA Exam Platform — Architecture Reference
 
 This is the system of record for design intent. If code and this document
 disagree, flag it — don't silently pick one. Phase scoping lives in
-CLAUDE.md and docs/PHASE1_PROMPTS.md; this document describes the full
-target system, including Phase 2+ pieces, so that Phase 1 code leaves the
-right seams.
+`CLAUDE.md`; this document describes the full target system so Phase 1/2
+code leaves the right seams for Phase 3.
 
-1. Product summary
+---
 
-An invite-only, adaptive DSA assessment platform with three differentiators:
+## 1. Product summary
 
+An AI-powered, invite-only DSA assessment platform with two exam modes and
+three core differentiators.
 
-Blueprint engine — examiners compose exams from a candidate profile
-(role, experience band) as a weighted topic mix with a difficulty curve.
-Blueprints are versioned templates, reusable across hiring drives.
-AI test-case factory — LLM-generated edge/adversarial/stress cases,
-accepted only after differential validation (reference solution and
-brute-force solution must agree on every case). Raw LLM output is never
-trusted as ground truth.
-Live follow-up channel — a proctor can modify constraints or push a
-follow-up question mid-exam over WebSocket. Every modification creates a
-new immutable question version; grading binds to the version active at
-submission time.
+### Two exam modes
 
+**Mode 1 — Examiner-directed**
+Examiner specifies: topic mix, difficulty band, time limit, candidate email.
+AI generates questions and test cases to exactly those specs.
+Examiner optionally reviews before the invite goes out.
 
-Two user planes, never mixed:
+**Mode 2 — Profile-driven**
+Examiner specifies: candidate email + target role/seniority (e.g. "SDE-2,
+backend"). AI reads the candidate's resume/GitHub profile, infers the
+appropriate topic mix and difficulty, generates questions and test cases
+automatically. Examiner optionally reviews before the invite goes out.
 
+Both modes share the same judge pipeline, session lifecycle, invite/auth
+flow, and WebSocket layer. The only difference is who drives the question
+spec — the examiner explicitly, or the AI from the candidate profile.
 
-Examiners log in (argon2 password + TOTP; org SSO later) with RBAC
-roles: admin (org + examiner management), author (questions,
-blueprints), proctor (live monitoring, follow-up pushes), reviewer
-(grading, reports).
-Candidates never register. They receive a single-use, time-boxed,
-signed invite link bound to a specific Gmail address, authenticate via
-Google OIDC, and the platform verifies the authenticated email exactly
-matches the invited email. Success consumes the token and issues an
-exam-scoped JWT valid only for that session window.
+### Three differentiators
 
+1. **Dual-mode composition** — examiner control when you want it, full AI
+   automation when you don't. Adapts to the hiring team's workflow.
+2. **Validated AI generation** — questions and test cases are generated and
+   validated automatically (differential testing; no human approver
+   required), but examiners can always review and override.
+3. **AI hiring signal** — beyond AC/WA verdicts: approach recognition,
+   complexity analysis, partial credit, behavioural signals, and a
+   structured seniority-calibrated report.
 
-2. Topology
+---
 
-Examiner console (React)      Candidate exam UI (React + Monaco)
-            \                          /            (WebSocket for verdicts,
-             \                        /              timers, follow-ups)
-              +----- API gateway ----+
-              |  TLS, JWT validation (two token types),
-              |  rate limiting, CORS, request-id propagation
-              +----+----------+-----------+
-                   |          |           |
-             Exam service  Question   Judge queue (SQS)
-             (blueprints,  service        |
-              sessions,   (bank, AI   Judge workers
-              invites,     test-case  (sandboxed exec,
-              WS hub)      factory)    autoscaled)
-                   \          |           /
-              Postgres      Redis       S3/MinIO
-              (record)   (sessions,   (code, test-case
-                          presence,    files, replays)
-                          rate limits)
+## 2. User planes
 
-Supporting services: notification (SES/SendGrid behind an interface;
-console/SMTP stub in dev), analytics (reports, cohort comparisons,
-question-quality metrics), plus observability (structured JSON logs with
-request ids, Prometheus/CloudWatch metrics, OpenTelemetry traces, Sentry).
+**Examiners** (argon2 + TOTP; org SSO later) with RBAC roles:
+- `admin` — org and examiner management
+- `author` — question bank, blueprints (Mode 1 only)
+- `proctor` — live monitoring, follow-up pushes
+- `reviewer` — grading, reports
 
-Service boundaries are hard: no cross-service code imports; HTTP or queue
-only. Every service is stateless — all session state lives in Redis so any
-pod serves any request.
+**Candidates** never register. Single-use, time-boxed, signed invite link
+bound to a specific Gmail address → Google OIDC → email-binding check →
+exam-scoped JWT. No match, no entry. Token consumed atomically on first
+successful auth.
 
-3. Services
+---
 
-3.1 Gateway
+## 3. Topology
 
-Terminates TLS, validates JWTs at the edge, distinguishes examiner tokens
-from candidate exam-scoped tokens (different signing keys or aud claims;
-a candidate token must never reach an examiner route and vice versa),
-applies per-identity Redis rate limits, handles CORS, and propagates a
-request id to all downstream calls.
+```
+Examiner console (React)        Candidate exam UI (React + Monaco)
+        \                                /
+         \                              /   WebSocket: verdicts,
+          +-------- API gateway -------+    timers, follow-ups
+          |  TLS · JWT validation (two token types)
+          |  rate limiting · CORS · request-id propagation
+          +------+----------+----------+-----------+
+                 |          |          |           |
+           Exam service  Question   AI service  Judge queue
+           (blueprints,  service    (profile    (SQS)
+            sessions,   (bank,      ingestion,      |
+            invites,     versioned  generation,  Judge workers
+            WS hub)      questions) evaluation)  (sandboxed,
+                 \          |          |          autoscaled)
+                  \         |          |         /
+               Postgres   Redis      S3/MinIO
+               (record)  (sessions,  (resumes, code,
+                          presence,   test-case files,
+                          rate limits) session replays)
+```
 
-3.2 Exam service
+Services communicate via HTTP or SQS only — no cross-service code imports.
+Every service is stateless; all session state lives in Redis.
 
-Owns: orgs and examiners (auth, RBAC), blueprints, exam scheduling,
-invites, candidate sessions, results, and the WebSocket hub.
+---
 
+## 4. Services
 
-Blueprints: versioned templates — target role, experience band, total
-duration, topic mix as [{topic_id, weight, difficulty_range, question_count}], weights sum to 100. Concretization samples questions
-from the question service over HTTP with per-candidate deterministic
-seeding: equivalent but non-identical sets (anti-cheat by construction).
-Invites: single-use signed token (stored jti in Redis for revocation
-and single-use enforcement), bound to email + exam + time window.
-Rejection paths: reuse, expiry, email mismatch, tampering.
-Sessions: server-authoritative timer in Redis; start only inside the
-window; auto-submit and lock on expiry; resumable after disconnect;
-every submission stores the question version id it answered.
-WebSocket hub: verdict push, server-clock sync, and (Phase 2)
-follow-up delivery and proctor live views. Presence in Redis pub/sub so
-the hub scales horizontally.
+### 4.1 Gateway
+TLS termination, JWT validation (examiner vs candidate tokens — distinct
+signing keys, distinct `aud` claims), per-identity Redis rate limits, CORS,
+request-id propagation. A candidate token must never reach an examiner route.
 
+### 4.2 Exam service
+Owns: orgs, examiners (auth, RBAC), blueprints, exam scheduling, invites,
+candidate sessions, results, WebSocket hub.
 
-3.3 Question service
+**Blueprints (Mode 1):** versioned templates — role, experience band,
+duration, topic mix `[{topic_id, weight, difficulty_range, count}]`,
+weights sum to 100. Concretization calls AI service to generate questions
+to spec, seeded per candidate (equivalent but non-identical sets).
 
-Owns: topic taxonomy (self-referencing tree, e.g. arrays → two pointers →
-sliding window), questions, versions, test cases, and the AI factory.
+**Profile-driven scheduling (Mode 2):** examiner provides candidate email
++ target role/seniority. Exam service calls AI service with the candidate
+profile; AI service returns a question spec (topic mix + difficulty band);
+exam service uses it as an auto-generated blueprint. Examiner can review
+and override before the invite goes out.
 
+**Invites:** single-use signed token (jti in Redis), bound to email + exam
++ time window. Rejection paths: reuse, expiry, email mismatch, tampering.
 
-Questions: title, statement (markdown), constraints, difficulty 1–5,
+**Sessions:** server-authoritative timer in Redis; start only inside window;
+auto-submit and lock on expiry; resumable after disconnect; every submission
+stores the question **version id** it answered.
+
+**WebSocket hub:** verdict push, server-clock sync, follow-up delivery
+(Phase 2), proctor live views. Presence via Redis pub/sub.
+
+### 4.3 Question service
+Owns: topic taxonomy (self-referencing tree), questions, immutable versions,
+test cases.
+
+**Questions:** title, statement (markdown), constraints, difficulty 1–5,
 topics (m2m), time/memory limits per language, starter code per language.
-Versions are immutable. Editing a published question, or a proctor
-modifying it mid-exam, creates a new version. Nothing ever rewrites a
-version a candidate may have answered.
-Test cases: metadata rows in Postgres pointing at S3 objects (large
-stress inputs never live in the DB). Presigned URLs for upload/download.
-Difficulty calibration (Phase 3): ratings self-adjust from observed
-pass rates and discrimination index, not just author judgment.
 
+**Versions are immutable.** Editing a published question or a proctor
+modifying one mid-exam creates a new version. Grading always binds to the
+version active at submission time.
 
-AI test-case factory (Phase 2) — background jobs, never inline in a
-request:
+**Test cases:** metadata rows in Postgres pointing at S3 objects. Presigned
+URLs for upload/download. Never store large inputs in the DB.
 
+**Difficulty calibration (Phase 3):** ratings self-adjust from observed pass
+rates and discrimination index.
 
-LLM drafts candidate cases (edge, adversarial, stress) given the
-statement and constraints.
-Constraint validator checks each input against declared bounds.
-Differential testing: run the examiner-approved reference solution AND a
-brute-force solution on every case; keep only cases where outputs agree.
-Disagreement = discard the case and log it (it may indicate a buggy
-reference — surface to the author).
-Examiner approves the final set before it can appear in an exam.
+### 4.4 AI service (new — Phase 2)
+The intelligence layer. Stateless FastAPI service; calls LLM APIs (Anthropic
+Claude / OpenAI) behind an internal abstraction with caching, retries, and
+per-org token-cost tracking.
 
+#### 4.4.1 Profile ingestion
+Input: resume PDF + optional GitHub handle.
+Pipeline:
+1. Extract text from PDF (pdfplumber / Tesseract for scanned docs).
+2. Parse GitHub: top languages, repo complexity signals, contribution
+   patterns via GitHub API.
+3. LLM call: structured extraction → `CandidateProfile` Pydantic model:
+   `{years_exp, domains[], tech_stack[], seniority_estimate, weak_signals[],
+   strong_signals[]}`.
+4. Profile vector stored in Postgres, referenced by the exam session.
 
-The factory can also generate a validated case set on demand in seconds for
-a freshly pushed mid-exam follow-up, against a reference solution the
-proctor supplies or approves. LLM calls go through one internal generation
-module with caching, retries, and per-org token-cost tracking.
+#### 4.4.2 Question generation
+Input: topic + difficulty band + constraints (from blueprint or profile).
+Pipeline:
+1. LLM generates: problem statement, input/output format, constraints,
+   2–3 worked examples, starter code per language.
+2. **Reference solution generation:** strong model generates an optimal
+   solution with complexity annotation.
+3. **Brute-force generation:** weaker/different model generates a naive
+   solution independently.
+4. **Automated validation:**
+   - Static analysis: constraints well-formed, examples consistent.
+   - Generate 50–100 random inputs within constraints.
+   - Run reference and brute-force against all inputs via judge pipeline.
+   - If agreement rate < 95% → discard, regenerate (up to 3 attempts).
+   - Agreement rate ≥ 95% → question accepted.
+5. Question + reference + brute-force stored as a new version in question
+   service. Examiner can review and override; exam proceeds either way.
 
-3.4 Judge service
+#### 4.4.3 Test case factory
+Input: accepted question version + reference solution + brute-force solution.
+Pipeline:
+1. LLM generates candidate cases: edge cases, adversarial inputs, stress
+   inputs (large n, all-same elements, sorted/reverse-sorted, etc.).
+2. Constraint validator: each input checked against declared bounds.
+3. Differential testing: run reference + brute-force on every case via
+   judge pipeline; keep only cases where both agree. Disagreements discarded
+   and logged.
+4. Test cases stored against the question version in S3.
 
-The component that must never fall over and must never be weakened.
+For mid-exam proctor follow-ups: factory runs on demand in seconds for the
+new constraint, attached to the new question version.
 
+#### 4.4.4 Adaptive difficulty engine
+Watches the candidate session in real time:
+- Solved in < 30% of allotted time, optimal complexity → raise difficulty
+- Past 60% of time, no AC → hold or lower
+- Simplified IRT model; calibrates from real session data in Phase 3.
+Signals sent to exam service which adjusts next question selection.
 
-Pipeline: exam service publishes a submission job → SQS → worker
-pulls, fetches test cases from S3, compiles/runs, compares output (exact
-and whitespace-tolerant modes) per case → publishes verdict message →
-exam service persists and pushes over WebSocket. Jobs are idempotent
-(dedupe on submission id).
-Sandbox (hard rules, restated from CLAUDE.md): per-run container with
-no network, read-only rootfs + tmpfs scratch, non-root uid, CPU/wall-time
-limit, memory limit, pids limit, output-size cap. Per-language runner
-images (Python 3.12, Java 21, C++ g++ 13; more later). Docker + gVisor as
-the target runtime; Firecracker microVMs are the long-term option.
-Verdicts: AC / WA / TLE / MLE / RE / CE per test case, with runtime
-and peak memory.
-Scaling: workers autoscale on queue depth. A submission spike means
-temporary latency, never failure. The queue is the shock absorber.
-A standing security test suite asserts that fork bombs, rootfs writes,
-network egress, env/host reads, and stdout floods all fail.
+#### 4.4.5 AI evaluation
+Runs after session ends (async, does not block result delivery):
+1. **Complexity analysis:** static AST analysis + LLM annotation —
+   detected time/space complexity vs optimal.
+2. **Approach recognition:** which algorithm family? Correct approach with
+   implementation bug vs fundamentally wrong approach.
+3. **Partial credit scoring:** 0.0–1.0 per question beyond binary AC/WA.
+4. **Behavioural signals:** run count before AC, response to TLE/WA,
+   manual edge case testing detected from run history.
+5. All signals written to `session_evaluation` table.
 
+#### 4.4.6 Hiring signal report
+Input: completed session + evaluation signals.
+Output: structured `HiringReport`:
+```json
+{
+  "seniority_match": "SDE-2",
+  "strong_areas": ["graphs", "heaps"],
+  "weak_areas": ["DP"],
+  "code_quality": "production-grade",
+  "problem_solving": "optimal approach, implementation errors",
+  "overall_score": 0.78,
+  "recommendation": "proceed",
+  "evidence": [
+    {"question": "...", "verdict": "AC", "approach": "BFS", "complexity": "O(V+E)", "partial_score": 1.0}
+  ]
+}
+```
+Report stored in Postgres, accessible to examiner/reviewer roles.
 
-3.5 Notification and analytics
+### 4.5 Judge service
+Unchanged from Phase 1. Queue-driven, sandboxed, autoscaled.
+Sandbox rules (never relaxed): no network, read-only rootfs + tmpfs scratch,
+non-root uid, CPU/wall-time/memory/pids limits, output-size cap.
+Runtime: Docker + gVisor (`--runtime=runsc`) on dedicated node pool.
+Verdicts: AC / WA / TLE / MLE / RE / CE per test case + runtime + peak memory.
 
-Notification: invite emails, reminders, results. One provider interface;
-SES in prod, console/SMTP stub in dev. Analytics (Phase 3): per-candidate
-reports, cohort comparisons, per-question pass rates and discrimination
-index, examiner dashboards.
+Note: judge pipeline is also used by the AI service during question
+validation and test-case factory (differential testing). Same queue, same
+workers — generation jobs use a lower-priority queue lane so live candidate
+submissions are never delayed by background generation.
 
-4. Live follow-up model (Phase 2, but shapes Phase 1 schema)
+### 4.6 Notification service
+Invite emails, reminders, results, report-ready notifications.
+One provider interface; SES in prod, console/SMTP stub in dev.
 
-Every question within a session is an event-sourced stream:
+---
 
-question_assigned → code_snapshot* → submission → verdict
-                 ↘ constraint_modified / followup_pushed  (creates new
-                    question version; UI shows a requirements diff banner)
+## 5. Live follow-up model (Phase 2)
 
-Events are append-only rows (session_id, seq, type, payload, question_ version_id, created_at). Benefits: perfect session replay for review and
-dispute resolution, and unambiguous grading (each submission references the
-version that was active). Phase 1 must therefore already store
-question_version_id on submissions and keep versions immutable — the
-event table itself can arrive in Phase 2.
+Every question in a session is an event-sourced stream:
+```
+question_assigned
+  → code_snapshot*
+  → submission → verdict
+  ↘ constraint_modified / followup_pushed
+      → new question_version
+      → AI factory generates + validates test cases on demand
+      → UI shows requirements-diff banner
+      → grading binds to version active at submission time
+```
+Events: append-only rows `(session_id, seq, type, payload,
+question_version_id, created_at)`. Phase 1 already stores
+`question_version_id` on submissions — event table arrives in Phase 2.
 
-Anti-cheat framing: per-candidate seeded variants plus real-time follow-ups
-are the primary defense against candidates outsourcing to an external LLM —
-a live constraint change is hard to relay in real time. Additional layers:
-copy-paste and tab-switch telemetry, MOSS-style token-fingerprint code
-similarity across candidates (Phase 3), optional webcam proctoring
-(premium, later).
+---
 
-5. Data layer
+## 6. Data layer
 
+**Postgres 16** — system of record. Every tenant table carries `org_id`.
+Phase 2 additions:
+```
+candidate_profile    (session_id, years_exp, domains, seniority, raw_json)
+generation_job       (id, type, status, attempts, model, cost, created_at)
+generated_question   (question_version_id, generation_job_id, model, cost)
+session_evaluation   (session_id, complexity, approach, partial_scores, signals_json)
+hiring_report        (session_id, report_json, recommendation, score, created_at)
+session_event        (session_id, seq, type, payload, question_version_id, created_at)
+```
 
-Postgres 16 — system of record: orgs, examiners, candidates,
-questions, versions, test-case metadata, blueprints, exams, invites,
-sessions, submissions, verdicts, events. Every tenant table carries
-org_id; every repository function takes org_id (multi-tenancy is
-structural). UUIDv7 keys; UTC timestamps.
-Redis — invite jti store, session state and timers, WebSocket
-presence/pub-sub, rate limits, hot aggregates.
-S3/MinIO — submitted code, test-case files, session replays.
-OpenSearch (Phase 3) — full-text question search.
+**Redis** — invite jtis (`gw:` prefix), session state/timers (`ex:` prefix),
+WebSocket presence/pub-sub, rate limits.
 
+**S3/MinIO** — submitted code, test-case files, resumes (encrypted at rest),
+session replays.
 
-Core relationships:
+**OpenSearch (Phase 3)** — full-text question search.
 
-org 1—n examiner
-org 1—n question 1—n question_version 1—n test_case(→S3)
-question n—m topic (tree)
-org 1—n blueprint(versioned) 1—n exam 1—n invite(email-bound)
-exam 1—n session 1—n submission(→question_version) 1—n case_verdict
-session 1—n event   (Phase 2)
+---
 
-6. Security model
+## 7. Security model
 
+- Two token planes (examiner vs candidate): RS256, distinct private keys,
+  distinct `aud` claims. Exam signs; gateway/question verify only.
+- Invite tokens: single-use, time-boxed, signed, email-bound; consumed
+  atomically on OIDC match.
+- RBAC via `require_role(...)` dependency; cross-org access is a tested
+  rejection path everywhere.
+- Judge sandbox per §4.5; never weakened.
+- Secrets via Secrets Manager in prod; nothing in logs.
+- Rate limiting per identity at the gateway; request-id in every log line.
+- AI service: LLM API keys in Secrets Manager; per-org cost tracking to
+  prevent runaway spend; generated content never trusted without validation.
+- Resumes stored encrypted at rest (S3 SSE-KMS); only the profile vector
+  crosses service boundaries, not the raw document.
 
-Two token planes (examiner vs candidate) with distinct lifetimes, claims,
-and audiences; validated at the gateway and re-checked in services.
-Invite tokens: single-use, time-boxed, signed, email-bound; consumed
-atomically on first successful OIDC match.
-RBAC enforced via a require_role(...) dependency; cross-org access is a
-tested rejection path everywhere.
-Sandbox rules per §3.4; never relaxed to make a test pass.
-Secrets via env vars only; .env gitignored; no secrets in logs.
-Rate limiting per identity at the gateway; request-id in every log line.
+---
 
+## 8. Scalability posture
 
-7. Scalability posture
+Stateless services → horizontal scale behind ALB. Redis-backed session state.
+Queue-buffered judging → autoscaled workers absorb submission bursts.
+AI generation jobs are async background tasks — never block the request path.
+Two SQS queue lanes: `judge-live` (candidate submissions, high priority) and
+`judge-gen` (generation/validation jobs, lower priority). Same worker fleet,
+priority handled by polling order.
+S3 for all large blobs. CDN for frontend. Postgres scales up → read replicas
+→ shard-by-org (org_id on every table from day one).
 
-Stateless services behind the gateway (horizontal scale), Redis-backed
-session state, queue-buffered judging with autoscaled workers, S3 for all
-large blobs, CDN for frontend assets. Target: thousands of concurrent
-candidates with the judge queue absorbing submission bursts. Postgres
-scales up first, read replicas later; org-scoped schema keeps a future
-shard-by-org option open.
+---
 
-8. Phasing
+## 9. Phasing
 
+### Phase 1 — Complete ✓
+Examiner auth + RBAC, question CRUD + taxonomy + manual test cases,
+blueprint builder with seeded sampling, invite + Google OIDC, session
+lifecycle, Docker-sandboxed judge (Py/Java/C++), candidate exam UI (Monaco),
+examiner console, API gateway, e2e proof. 186 tests passing.
 
-Phase 1 (MVP): examiner auth + RBAC, question CRUD + taxonomy +
-manual test cases, blueprint builder with seeded sampling, invite +
-Google OIDC, session lifecycle, Docker-sandboxed judge (Py/Java/C++),
-candidate exam UI (Monaco), examiner console, gateway, e2e proof.
-Phase 2: AI test-case factory with differential validation, WebSocket
-live proctoring, mid-exam follow-ups (event sourcing), session replay.
-Phase 3: adaptive difficulty within an exam, plagiarism detection,
-analytics dashboards, difficulty self-calibration, OpenSearch, billing,
-optional webcam proctoring.
+### Production readiness — In progress
+CI ✓, branch protection ✓, Redis key-prefix fix ✓
+Remaining: RS256 token split, migration race fix, judge gVisor isolation,
+frontend prod build, SES sender, real Google OIDC config, TLS, Terraform,
+CI/CD deploy pipeline.
 
+### Phase 2 — AI intelligence layer
+Each item gets a design note in `docs/` before its Claude Code prompt.
+Order:
+1. Profile ingestion (PDF + GitHub → CandidateProfile)
+2. AI question generator + automated validation loop
+3. AI test-case factory (fully automated)
+4. Mode 2 scheduling (profile-driven exam composition)
+5. Adaptive difficulty engine
+6. WebSocket live proctoring + mid-exam follow-ups (event sourcing)
+7. AI evaluation (complexity, approach, partial credit, behavioural signals)
+8. Hiring signal report generator
 
-Each Phase 2+ feature gets a short design note in docs/ before any
-implementation prompt.
+### Phase 3
+IRT-based difficulty calibration, plagiarism/AI-assistance detection,
+candidate-facing results and feedback, employer analytics dashboard,
+cohort comparisons, OpenSearch, billing, optional webcam proctoring.

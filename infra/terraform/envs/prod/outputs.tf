@@ -2,6 +2,19 @@ output "alb_dns_name" {
   value = module.alb.alb_dns_name
 }
 
+output "private_subnet_ids" {
+  description = "Needed by deploy.yml's `aws ecs run-task --network-configuration` for the migrate tasks."
+  value       = module.vpc.private_subnet_ids
+}
+
+output "exam_migrate_security_group_id" {
+  value = module.ecs_migrate_exam.security_group_id
+}
+
+output "question_migrate_security_group_id" {
+  value = module.ecs_migrate_question.security_group_id
+}
+
 output "api_domain" {
   value = local.api_domain
 }

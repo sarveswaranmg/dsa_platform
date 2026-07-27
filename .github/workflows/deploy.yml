@@ -1,0 +1,132 @@
+name: Deploy
+
+# Runs after ci.yml passes on main — not a second push trigger, which would
+# run in parallel with CI rather than after it. workflow_dispatch is also
+# allowed for manual redeploys (e.g. re-running just the deploy after a
+# transient AWS error, without needing a new commit).
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  id-token: write # OIDC — no long-lived AWS keys anywhere in this workflow.
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false # never abort a deploy mid-flight
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  ECS_CLUSTER_NAME: ${{ secrets.ECS_CLUSTER_NAME }}
+  # workflow_run doesn't set github.sha to the source workflow's commit —
+  # it stays on the default branch tip. Use the real commit explicitly.
+  DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+jobs:
+  build-and-push:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [gateway, exam, question, judge]
+    outputs:
+      registry: ${{ steps.ecr.outputs.registry }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.DEPLOY_SHA }}
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: aws-actions/amazon-ecr-login@v2
+        id: ecr
+
+      - name: Build and push ${{ matrix.service }}
+        run: |
+          set -euo pipefail
+          IMAGE="${{ steps.ecr.outputs.registry }}/${{ matrix.service }}:${{ env.DEPLOY_SHA }}"
+          docker build -t "$IMAGE" -f "services/${{ matrix.service }}/Dockerfile" "services/${{ matrix.service }}"
+          docker push "$IMAGE"
+
+  migrate:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    env:
+      REGISTRY: ${{ needs.build-and-push.outputs.registry }}
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Run exam-migrate
+        run: |
+          ./scripts/run-migrate-task.sh exam-migrate "$REGISTRY/exam:${{ env.DEPLOY_SHA }}" \
+            "${{ secrets.PRIVATE_SUBNET_IDS }}" "${{ secrets.EXAM_MIGRATE_SECURITY_GROUP_ID }}"
+
+      - name: Run question-migrate
+        run: |
+          ./scripts/run-migrate-task.sh question-migrate "$REGISTRY/question:${{ env.DEPLOY_SHA }}" \
+            "${{ secrets.PRIVATE_SUBNET_IDS }}" "${{ secrets.QUESTION_MIGRATE_SECURITY_GROUP_ID }}"
+
+  deploy-services:
+    needs: [build-and-push, migrate]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [gateway, exam, question]
+    env:
+      REGISTRY: ${{ needs.build-and-push.outputs.registry }}
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Roll out new image for ${{ matrix.service }}
+        run: |
+          ./scripts/deploy-ecs-service.sh "${{ matrix.service }}" \
+            "$REGISTRY/${{ matrix.service }}:${{ env.DEPLOY_SHA }}" "${{ env.ECS_CLUSTER_NAME }}"
+
+  deploy-frontend:
+    needs: deploy-services
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.DEPLOY_SHA }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        working-directory: frontend
+        env:
+          VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL }}
+        run: |
+          npm ci
+          npm run build
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Sync to S3
+        run: aws s3 sync frontend/dist "s3://${{ secrets.S3_FRONTEND_BUCKET }}" --delete
+
+      - name: Invalidate CloudFront
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id "${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}" \
+            --paths "/*"

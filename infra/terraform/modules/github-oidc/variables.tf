@@ -24,8 +24,8 @@ variable "ecs_service_arns" {
   type = list(string)
 }
 
-variable "ecs_task_definition_arns" {
-  description = "Includes both the long-running services and the migrate tasks — RegisterTaskDefinition is scoped by family, not by ARN, but PassRole below needs the concrete role ARNs."
+variable "migrate_task_definition_families" {
+  description = "Task definition family names (e.g. \"exam-migrate\") — RunTask is scoped to a family-wildcard ARN pattern built from these, since deploy.yml registers a new revision every deploy."
   type        = list(string)
 }
 

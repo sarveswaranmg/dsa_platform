@@ -1,0 +1,39 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+
+from app.api.routes import health, profiles
+from app.core import s3
+from app.core.config import get_settings, validate_production_config
+from app.core.exceptions import DomainError
+from app.core.logging import RequestIdMiddleware, configure_logging
+from app.db.session import dispose_engine
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    configure_logging("ai")
+    validate_production_config(get_settings())
+    if get_settings().env == "dev":
+        s3.ensure_bucket()  # localstack/MinIO bootstrap; prod buckets exist
+    yield
+    await dispose_engine()
+
+
+async def domain_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    assert isinstance(exc, DomainError)
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+
+def create_app() -> FastAPI:
+    app = FastAPI(title="ai-service", lifespan=lifespan)
+    app.add_middleware(RequestIdMiddleware)
+    app.add_exception_handler(DomainError, domain_error_handler)
+    app.include_router(health.router)
+    app.include_router(profiles.router)
+    return app
+
+
+app = create_app()

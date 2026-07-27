@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     # Upstreams (in-network; these services publish no host ports).
     exam_service_url: str = "http://localhost:8001"
     question_service_url: str = "http://localhost:8002"
+    ai_service_url: str = "http://localhost:8003"
 
     # RS256 public key (PEM) used to verify tokens exam signs. Gateway never
     # holds a private key — see docs/architecture.md and the production

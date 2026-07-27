@@ -13,6 +13,7 @@ from dataclasses import dataclass
 class Upstream(enum.StrEnum):
     EXAM = "exam"
     QUESTION = "question"
+    AI = "ai"
 
 
 class Policy(enum.StrEnum):
@@ -48,6 +49,8 @@ ROUTES: tuple[Route, ...] = (
     # Examiner plane — question service.
     Route("/topics", Upstream.QUESTION, Policy.EXAMINER),
     Route("/questions", Upstream.QUESTION, Policy.EXAMINER),
+    # Examiner plane — ai service.
+    Route("/profiles", Upstream.AI, Policy.EXAMINER),
 )
 
 

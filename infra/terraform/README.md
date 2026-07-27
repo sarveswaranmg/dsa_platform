@@ -126,16 +126,85 @@ restructuring needed either way.
 trust policy restricts assumption to `refs/heads/main` in the configured
 `github_org`/`github_repo`.
 
-**Required GitHub secret** (Settings → Secrets and variables → Actions):
+**Required GitHub secrets** (Settings → Secrets and variables → Actions →
+repository secrets) — everything `.github/workflows/deploy.yml` needs, each
+sourced from a `terraform output` after `apply`:
 
 | Secret | Value |
 |---|---|
-| `AWS_ROLE_ARN` | `terraform output github_actions_role_arn` |
+| `AWS_ROLE_ARN` | `terraform output -raw github_actions_role_arn` |
+| `AWS_REGION` | Whatever you set `aws_region` to (default `us-east-1`) |
+| `ECS_CLUSTER_NAME` | `terraform output -raw ecs_cluster_name` |
+| `PRIVATE_SUBNET_IDS` | `terraform output -json private_subnet_ids` — comma-join the list (e.g. `subnet-aaa,subnet-bbb`) |
+| `EXAM_MIGRATE_SECURITY_GROUP_ID` | `terraform output -raw exam_migrate_security_group_id` |
+| `QUESTION_MIGRATE_SECURITY_GROUP_ID` | `terraform output -raw question_migrate_security_group_id` |
+| `S3_FRONTEND_BUCKET` | `terraform output -raw frontend_bucket_name` |
+| `CLOUDFRONT_DISTRIBUTION_ID` | `terraform output -raw cloudfront_distribution_id` |
+| `VITE_API_BASE_URL` | `https://<api_domain>` if `domain_name` is set, else `http://<alb_dns_name>` (both from `terraform output`) |
 
-(`deploy.yml`, which assumes this role, is a separate CI/CD slice — this
-just provisions the role it needs. Additional secrets `deploy.yml` itself
-needs, if any beyond `AWS_ROLE_ARN` and the region, will be documented here
-alongside that workflow.)
+`deploy.yml` triggers via `workflow_run` after `ci.yml` completes
+successfully on `main` (or manually via `workflow_dispatch`) and runs four
+jobs in sequence: build+push all 4 images to ECR, run the exam/question
+migrate tasks and wait for them, roll gateway/exam/question to the new
+image, then build the frontend with `VITE_API_BASE_URL` and sync+invalidate
+CloudFront. See the workflow file itself and `scripts/run-migrate-task.sh` /
+`scripts/deploy-ecs-service.sh` for the exact mechanics.
+
+## Deploying application code
+
+Once the infrastructure above exists (`terraform apply` done, Google OIDC
+secrets populated, the 9 GitHub secrets set), here's the full path from a
+merged PR to a live deploy:
+
+1. **First deploy only — bootstrap ECS with a real image once, manually.**
+   The ECS services `terraform apply` created reference `var.image_tag`
+   (`"initial"` by default) — an image that doesn't exist, so they'll show 0
+   running tasks until something pushes a real one. `deploy.yml` itself is
+   what does this normally, but on a brand-new environment there's a
+   chicken-and-egg gap (services aren't healthy yet, but that's fine —
+   `deploy.yml` doesn't require them to be healthy first, it just registers
+   a new task definition revision and updates the service regardless).
+   Simplest path: just merge to `main` once with CI passing — `deploy.yml`
+   builds and pushes real images and rolls the services to them, same as
+   every subsequent deploy. No separate manual bootstrap actually needed.
+
+2. **Normal deploy flow**: merge a PR to `main` → `ci.yml` runs (`make
+   lint`, `make test`) → on success, `deploy.yml` fires automatically:
+   - **`build-and-push`** (parallel, one per service): builds
+     `services/<name>/Dockerfile`, pushes to ECR tagged with the commit SHA.
+     Watch this job if a build itself is broken (Dockerfile change, missing
+     dependency) — nothing below it runs until all four succeed.
+   - **`migrate`**: registers a fresh `exam-migrate`/`question-migrate` task
+     definition revision pointing at the new `exam`/`question` image, runs
+     each via `aws ecs run-task`, and waits for it to stop. **If a migration
+     fails (non-zero exit), the job fails here and `deploy-services` never
+     runs** — the currently-running gateway/exam/question tasks are
+     untouched, so the app keeps serving traffic on the old code/schema.
+     Check the failed migration's CloudWatch log group (`/ecs/exam-migrate`
+     or `/ecs/question-migrate`) for the Alembic error, fix it, and
+     re-push — safe to re-run, migrations are idempotent (`alembic upgrade
+     head`).
+   - **`deploy-services`** (parallel, one per service): registers a new task
+     definition revision per service, `update-service --force-new-deployment`,
+     waits for `services-stable`. This is what actually performs the rolling
+     deploy — ECS starts new tasks on the new revision, health-checks them
+     via the target group (gateway) or Cloud Map, and only then drains the
+     old ones.
+   - **`deploy-frontend`**: builds `frontend/` with `VITE_API_BASE_URL`
+     baked in, `aws s3 sync --delete`, then invalidates the whole CloudFront
+     distribution (`/*`) so the new bundle is served immediately instead of
+     waiting out cache TTLs.
+
+3. **Verifying a deploy landed**: `curl http://<alb_dns_name>/healthz` (or
+   `https://<api_domain>/healthz` if TLS is on) should hit gateway; the
+   CloudFront domain (or `domain_name`) should serve the updated frontend
+   immediately post-invalidation. `aws ecs describe-services --cluster
+   <cluster> --services gateway exam question` shows each service's running
+   task definition revision if you want to confirm exactly what's live.
+
+4. **Manual redeploy** (no new commit — e.g. retrying after a transient AWS
+   throttling error): trigger `deploy.yml` via `workflow_dispatch` from the
+   Actions tab. It deploys whatever's on `main`'s tip.
 
 ## Known gaps / follow-ups
 
@@ -164,10 +233,12 @@ Flagging these explicitly rather than silently working around them:
   needs an authorized JavaScript origin, not a redirect URI. It's here to
   match `CLAUDE.md`'s checklist wording and be ready if a server-side flow
   is ever added.
-- **The frontend's static bundle (`modules/frontend-cdn`) is single-origin
-  S3+CloudFront.** `frontend/src`'s API calls are same-origin relative paths
-  today (correct for the `frontend/Dockerfile` nginx-proxy prod path) — that
-  does *not* work unmodified via CloudFront alone, since there's no
-  server-side proxy layer here. Wiring `VITE_API_BASE_URL` into the actual
-  fetch calls (cross-origin, direct to the ALB) plus gateway's
-  `CORS_ORIGINS`, is the CI/CD deploy slice's job.
+- **`deploy.yml` doesn't redeploy judge's EC2 ASG.** Its rolling-deploy step
+  only covers ECS services (gateway/exam/question) — judge runs on a plain
+  EC2 ASG, and "update the service" doesn't map the same way there (no ECS
+  service to roll). `build-and-push` does push a new judge image to ECR,
+  but nothing currently triggers the ASG to pick it up (new instances
+  launched later will `docker pull` it via `user_data`, but already-running
+  instances won't restart their container automatically). An `aws
+  autoscaling start-instance-refresh` step is a reasonable follow-up, not
+  yet built.

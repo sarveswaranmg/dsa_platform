@@ -10,6 +10,21 @@ export interface TokenResponse {
   expires_in: number
 }
 
+export interface RegisterPayload {
+  org_name: string
+  email: string
+  password: string
+}
+
+export interface RegisterResponse {
+  examiner_id: string
+  org_id: string
+  email: string
+  role: ExaminerRole
+  totp_secret: string
+  totp_provisioning_uri: string
+}
+
 export interface Examiner {
   id: string
   org_id: string

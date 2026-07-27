@@ -11,6 +11,7 @@ import { ExamSchedulePage } from './routes/examiner/ExamSchedulePage'
 import { LoginPage } from './routes/examiner/LoginPage'
 import { QuestionBankPage } from './routes/examiner/QuestionBankPage'
 import { QuestionEditorPage } from './routes/examiner/QuestionEditorPage'
+import { RegisterPage } from './routes/examiner/RegisterPage'
 import { ResultsPage } from './routes/examiner/ResultsPage'
 
 const queryClient = new QueryClient({
@@ -30,6 +31,7 @@ export function App() {
 
           {/* Examiner console — role gates mirror the backend's require_role */}
           <Route path="/console/login" element={<LoginPage />} />
+          <Route path="/console/register" element={<RegisterPage />} />
           <Route
             path="/console"
             element={

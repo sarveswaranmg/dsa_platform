@@ -13,9 +13,8 @@ examiners can push live follow-ups mid-exam over WebSocket.
 - **Queue**: SQS-compatible (localstack in dev) for the judge pipeline
 - **Frontend**: React 18 + TypeScript + Vite, Monaco editor, native WebSocket
 - **Infra**: Docker Compose for dev. Terraform for prod (VPC, RDS, ElastiCache,
-  S3, SQS, ECS, judge node pool) is planned but not yet written — see the
-  Production readiness section below. Do not assume Terraform files exist
-  until this line is updated.
+  S3, SQS, ECS, judge node pool) is written under `infra/terraform/` — see the
+  Production readiness section below for the two items still open.
 - **Tests**: pytest + pytest-asyncio (backend), Vitest + React Testing Library (frontend)
 
 ## Repo layout
@@ -25,6 +24,8 @@ services/gateway/    # routing, JWT validation, rate limiting
 services/exam/       # blueprints, sessions, invites, WebSocket hub
 services/question/   # question bank, taxonomy, AI test-case factory
 services/judge/      # queue consumer + sandboxed execution workers
+services/ai/         # candidate profile ingestion, question/test-case
+                     # generation, adaptive difficulty, evaluation (Phase 2)
 frontend/            # examiner console + candidate exam UI
 infra/               # docker-compose, Terraform, localstack config
 docs/                # architecture.md, DECISIONS.md, design notes
@@ -74,38 +75,53 @@ builder, Gmail invite + Google SSO, Monaco exam UI, Docker-sandboxed judge
 and verified (186 tests passing). See `docs/PHASE1_PROMPTS.md` for the
 slice history.
 
-**Now in progress: production readiness** (see checklist below), then
-Phase 2 (AI test-case generation, live follow-ups/WebSocket proctoring —
-scoped in `docs/architecture.md`). Do not start Phase 2 slices until the
-readiness checklist is cleared.
+**Production readiness: substantially done** (see checklist below — 2 items
+open). **Now starting Phase 2** (AI test-case generation, live
+follow-ups/WebSocket proctoring — scoped in `docs/architecture.md`,
+slice plan in `docs/PHASE2_PROMPTS.md`). Work through Phase 2 one slice per
+session: write the slice's `docs/design-*.md` note, Plan mode, implement,
+`make test && make lint`, commit, get sign-off before starting the next slice.
 
-## Production readiness (not yet done)
+## Production readiness
 
-- [ ] CI: GitHub Actions running `make lint` + `make test` on push/PR
-- [ ] Split `alembic upgrade head` out of app start command → one-shot migration task
-- [ ] Redis: replace numeric DB indexes (gateway=1, exam=0) with key prefixes
-      (ElastiCache cluster mode doesn't support multiple logical DBs)
-- [ ] RS256 token split: exam signs with private key; gateway/question verify
-      with public key only (currently shared HS256 secret — gateway can mint
-      tokens, which it shouldn't be able to do)
-- [ ] Judge isolation: dedicated node pool (MVP) → gVisor (`--runtime=runsc`)
-      → Firecracker (stretch). Never co-tenant judge workers with other services.
-- [ ] Frontend: `npm run build` → S3/CloudFront (Vite dev server is dev-only).
-      A Docker/nginx build already exists (`frontend/Dockerfile`, `make
-      build-frontend`, `infra/docker-compose.prod.yml`) as an interim/local
-      "prod-like" option — nginx proxies API paths same-origin, so
-      `VITE_API_BASE_URL` is a Docker build-arg baked into nginx's config,
-      not into the JS bundle. `VITE_API_BASE_URL` must be set at build time
-      in CI/CD (per environment) for either path; the eventual direct
-      S3/CloudFront static hosting has no proxy layer, so that path will
-      need `VITE_API_BASE_URL` baked into the JS bundle instead (not yet
-      wired — `frontend/src` makes only same-origin relative fetches today).
-- [ ] SES implementation behind existing `EmailSender` protocol
-- [ ] Real Google OIDC client + authorized redirect URIs for the real domain
-- [ ] TLS terminated at the load balancer (everything is plain HTTP today)
-- [ ] Terraform: VPC, RDS, ElastiCache, S3+CORS, SQS, ECS services, judge ASG
-- [ ] Move S3 bucket + CORS policy out of app bootstrap (gated to `env == "dev"`)
-      into Terraform
+- [x] CI: GitHub Actions running `make lint` + `make test` on push/PR
+      (`.github/workflows/ci.yml`)
+- [x] Split `alembic upgrade head` out of app start command → one-shot
+      migration task (`exam-migrate`/`question-migrate` in
+      `infra/docker-compose.yml`; ECS one-shot task via
+      `scripts/run-migrate-task.sh` + `.github/workflows/deploy.yml`)
+- [x] Redis: numeric DB indexes replaced with key prefixes
+      (`services/exam/app/core/redis_keys.py` — `ex:` prefix; single
+      logical DB, ElastiCache cluster-mode compatible)
+- [x] RS256 token split: exam signs with the private key only; gateway and
+      question only hold the public key and verify
+      (`services/exam/app/core/security.py`,
+      `services/gateway/app/auth.py`, `services/question/app/core/security.py`)
+- [ ] **Judge isolation** — dedicated node pool done
+      (`infra/terraform/modules/judge-asg`); gVisor (`--runtime=runsc`) is
+      wired and supported but `terraform.tfvars.example` still defaults
+      `judge_runtime = "runc"`. Firecracker not started. Never co-tenant
+      judge workers with other services.
+- [x] Frontend: `npm run build` → S3/CloudFront via
+      `.github/workflows/deploy.yml` (`deploy-frontend` job) +
+      `infra/terraform/modules/frontend-cdn`. The Docker/nginx build
+      (`frontend/Dockerfile`, `make build-frontend`,
+      `infra/docker-compose.prod.yml`) remains as an interim/local
+      "prod-like" option.
+- [x] SES implementation behind the `EmailSender` protocol
+      (`services/exam/app/notifications/ses_sender.py`)
+- [ ] **Real Google OIDC client** — infra wires real secrets end-to-end
+      (`infra/terraform/modules/secrets`), but registering the actual OAuth
+      client + authorized redirect URIs in Google Cloud Console for the
+      real domain is an external, non-code step that still needs doing.
+- [x] TLS terminated at the load balancer
+      (`infra/terraform/modules/alb` — ACM cert + HTTPS:443 listener,
+      HTTP→HTTPS redirect)
+- [x] Terraform: VPC, RDS, ElastiCache, S3+CORS, SQS, ECS services, judge
+      ASG (`infra/terraform/modules/*`, wired in `infra/terraform/envs/prod/main.tf`)
+- [x] S3 bucket + CORS policy moved out of app bootstrap into Terraform
+      (`services/question/app/main.py` only calls `ensure_bucket()` when
+      `env == "dev"`; prod bucket/CORS is `infra/terraform/modules/s3-app`)
 
 ## When unsure
 
