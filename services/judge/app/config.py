@@ -10,10 +10,18 @@ class Settings(BaseSettings):
     sqs_endpoint_url: str = "http://localhost:4566"
     submissions_queue: str = "dsa-submissions"
     verdicts_queue: str = "dsa-verdicts"
+    # judge-gen lane (Phase 2 Slice 2): AI question generation's differential
+    # testing, polled by a separate worker process (app/gen_worker.py) so
+    # generation load can never delay a candidate's real submission.
+    gen_jobs_queue: str = "dsa-judge-gen"
+    gen_results_queue: str = "dsa-judge-gen-results"
 
     # S3 (localstack in dev) — where the question service stored test cases.
     s3_endpoint_url: str = "http://localhost:4566"
     s3_bucket: str = "question-artifacts"
+    # judge-gen jobs read their generated inputs from the ai service's own
+    # bucket instead (see app/gen_runner.py).
+    ai_s3_bucket: str = "ai-artifacts"
 
     aws_access_key_id: str = "test"
     aws_secret_access_key: str = "test"

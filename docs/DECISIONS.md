@@ -3,6 +3,105 @@
 Short, dated records of significant technical decisions and the reasoning
 behind them. Newest first.
 
+## Test-case factory: AI-generated questions only, reuses Slice 2's judge-gen lane as-is (2026-07-28)
+
+**Decision:** Phase 2 Slice 3's test-case factory (`POST
+/test-cases/generate`) only supports question versions produced by a
+**succeeded** Slice 2 generation job — confirmed explicitly with the
+user. It looks one up in `ai`'s own `generation_jobs` table by
+`question_version_id`; manually-authored (Phase 1) questions have
+neither a reference/brute-force solution nor a structured `input_spec`
+to validate candidates against, so they 404. Extending to
+examiner-supplied solutions for manual questions (per
+`docs/architecture.md`'s "reference solution the proctor supplies or
+approves") is deferred to a later slice.
+
+Submitting candidates for differential testing reuses Slice 2's
+`DiffJob`/`DiffResult`/`gen_runner` machinery **unchanged** in shape, with
+two small additive fields on the wire contract: `capture_agreement_outputs`
+(the factory needs the reference's output on agreement — it becomes a
+kept case's expected output — where Slice 2 only needed it on
+disagreement, for the discard log) and `results_queue` (lets the
+on-demand synchronous variant use a throwaway per-request reply queue
+instead of the shared async one). Both default to Slice 2's original
+behavior, so nothing there changed. `sandbox.py` and judge-live
+(`worker.py`/`runner.py`) remain untouched.
+
+Kept cases are stored via a new `test_case_generation_jobs` table — not
+a reuse of `generation_jobs.discard_log`, despite that being the Phase 2
+prompt doc's original shorthand — because that row's status is already
+terminal (`succeeded`) by the time a factory job runs against it, and
+overloading it with a second, independent job lifecycle would conflate
+two different concerns.
+
+**On-demand (synchronous) variant caveat:** discovered during end-to-end
+verification, not by unit tests: question service's presigned test-case
+upload URLs are generated for browser/host consumption
+(`s3_presign_endpoint_url`), so PUTting from *inside* the `ai` container
+to the exact URL returned failed (`localhost:4566` doesn't resolve
+in-network). Fixed by rewriting the URL's host:port to ai's own
+`s3_endpoint_url` before PUTting (`app/services/testcase_generation.py`
+`_in_network_s3_url`) — already environment-correct on both sides
+(`localstack:4566` in containers, `localhost:4566` for tests on the
+host), and a no-op in production (real S3 URLs never contain
+`localhost:4566`). A first attempt hardcoded the literal string swap and
+broke host-run tests; the fix instead derives the target host from
+`get_settings().s3_endpoint_url` via `urlsplit`/`urlunsplit`, which
+adapts correctly in both places.
+
+**Status:** Implemented and verified end-to-end through the real stack,
+including the synchronous variant's real poll loop and timeout path.
+
+## Question generation: separate judge-gen lane reusing the sandbox unchanged (2026-07-28)
+
+**Decision:** Phase 2 Slice 2's differential testing (reference vs.
+brute-force solution, compared to each other on ~100 generated inputs)
+runs through a **new, fully separate** SQS lane — `dsa-judge-gen` /
+`dsa-judge-gen-results` — consumed by a **new worker process**
+(`services/judge/app/gen_worker.py` + `gen_runner.py`), never the
+existing judge-live queues or `worker.py`/`runner.py`. Container
+invocation glue (`_run_container`, `_name`, `_image`, `SOURCE_FILENAME`)
+was extracted from `runner.py` into `exec_common.py` so the new path
+reuses it instead of duplicating it; `sandbox.py` (the actual security
+contract — network-none, read-only rootfs, non-root, resource limits)
+was **not touched at all**. Reference/brute-force solutions are
+generated and validated in Python only, regardless of how many
+`language_targets` are requested for starter code — proving the
+problem's logical soundness once is sufficient; starter code in other
+languages is unvalidated scaffolding, same as any other question-bank
+content.
+
+Because the generation results consumer has no live examiner bearer
+token by the time a job succeeds (could be minutes after the original
+request, well past the 15-minute access token TTL), `services/question`
+gained a new **internal** endpoint (`POST /internal/questions`,
+org_id in the body, no auth) rather than storing/reusing a token — same
+trusted-network-only convention as its existing `/internal/...` routes,
+already blocked at the gateway edge.
+
+**Why not extend the judge-live queue/worker instead:** differential
+testing has no "expected output" to compare against (it compares two
+fresh outputs to each other) and needs two solutions compiled per job
+instead of one — forcing that shape into `SubmissionJob`/`runner.py`
+would have complicated the hot path candidates depend on. A wholly
+separate lane also means heavy generation traffic can never delay a
+candidate's real submission, which was an explicit Phase 2 requirement
+("judge-gen lower priority than judge-live, never mix them").
+
+**Status:** Implemented and verified end-to-end through the real stack
+(gateway → ai → judge-gen → ai → question). One pre-existing gap
+surfaced during that verification, not introduced by this slice: neither
+`services/judge`'s Dockerfile-built image contains a `docker` CLI binary
+(the `docker.io` apt package installed with `--no-install-recommends`
+omits it on this platform) — so the containerized `judge`/`judge-gen`
+services can't actually launch sandboxed containers via `docker compose
+up` here. This was already worked around for `judge` before Slice 2
+existed (`docs` and `scripts/e2e.py` both say to run
+`cd services/judge && uv run python -m app.worker` on the host on
+macOS); `judge-gen` inherits the same workaround
+(`uv run python -m app.gen_worker`). Fixing the Dockerfile itself is
+out of scope for this slice — flagged for a follow-up.
+
 ## Profile ingestion: fire-and-forget asyncio task, mock LLM/GitHub by default (2026-07-27)
 
 **Decision:** The new `services/ai`'s profile ingestion job (Phase 2 Slice

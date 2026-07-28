@@ -1,14 +1,23 @@
 import logging
 import time
-from typing import Protocol
+from typing import Literal, Protocol
 
 import httpx
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter
 
 from app.clients.github import GitHubSignals
 from app.core.config import get_settings
+from app.generation.schemas import (
+    DIFFICULTY_BANDS,
+    GeneratedExample,
+    GeneratedQuestionDraft,
+    GeneratedTestCase,
+    InputVar,
+)
 
 logger = logging.getLogger(__name__)
+
+SolutionRole = Literal["reference", "brute_force"]
 
 
 class ExtractedProfile(BaseModel):
@@ -28,6 +37,21 @@ class LLMClient(Protocol):
         self, resume_text: str, github_signals: GitHubSignals | None
     ) -> ExtractedProfile: ...
 
+    async def draft_question(
+        self, topic: str, difficulty_band: str, language_targets: list[str]
+    ) -> GeneratedQuestionDraft: ...
+
+    async def generate_solution(self, draft: GeneratedQuestionDraft, role: SolutionRole) -> str: ...
+
+    async def generate_test_cases(
+        self,
+        draft: GeneratedQuestionDraft,
+        *,
+        edge_count: int,
+        adversarial_count: int,
+        stress_count: int,
+    ) -> list[GeneratedTestCase]: ...
+
 
 class MockLLMClient:
     """Default backend — deterministic, no network call, no API key
@@ -46,6 +70,60 @@ class MockLLMClient:
             strong_signals=["clear resume structure"],
         )
 
+    async def draft_question(
+        self, topic: str, difficulty_band: str, language_targets: list[str]
+    ) -> GeneratedQuestionDraft:
+        lo, _hi = DIFFICULTY_BANDS[difficulty_band]
+        return GeneratedQuestionDraft(
+            title="Add Two Numbers",
+            statement_md=(
+                f"Read two integers `a` and `b` (one per line); print `a + b`. Topic: {topic}."
+            ),
+            constraints_md="1 <= a, b <= 1000",
+            examples=[GeneratedExample(input="2\n3", output="5")],
+            starter_code={lang: "# read a and b\n" for lang in language_targets},
+            input_spec=[
+                InputVar(name="a", kind="int", min_value=1, max_value=1000),
+                InputVar(name="b", kind="int", min_value=1, max_value=1000),
+            ],
+            difficulty=lo,
+        )
+
+    async def generate_solution(self, draft: GeneratedQuestionDraft, role: SolutionRole) -> str:
+        # Both roles return the same trivially-correct program — a fast,
+        # deterministic fixture that always agrees with itself in tests.
+        return "a = int(input())\nb = int(input())\nprint(a + b)\n"
+
+    async def generate_test_cases(
+        self,
+        draft: GeneratedQuestionDraft,
+        *,
+        edge_count: int,
+        adversarial_count: int,
+        stress_count: int,
+    ) -> list[GeneratedTestCase]:
+        # Cycles through a few fixed, in-bounds (a, b) pairs — valid against
+        # the mock draft's input_spec regardless of requested counts, so
+        # tests exercise the full pipeline without a real LLM call.
+        pairs = [(1, 1), (1000, 1000), (500, 500), (1, 1000), (1000, 1)]
+        cases: list[GeneratedTestCase] = []
+        counts: list[tuple[Literal["edge", "adversarial", "stress"], int]] = [
+            ("edge", edge_count),
+            ("adversarial", adversarial_count),
+            ("stress", stress_count),
+        ]
+        for case_type, count in counts:
+            for i in range(count):
+                a, b = pairs[i % len(pairs)]
+                cases.append(
+                    GeneratedTestCase(
+                        input=f"{a}\n{b}",
+                        description=f"mock {case_type} case {i + 1}",
+                        case_type=case_type,
+                    )
+                )
+        return cases
+
 
 class AnthropicLLMClient:
     """Real Claude calls with structured output, bounded retries, and a
@@ -53,24 +131,17 @@ class AnthropicLLMClient:
     until the response — logged when available)."""
 
     _BASE_URL = "https://api.anthropic.com/v1/messages"
-    _MODEL = "claude-sonnet-4-6"
+    _DRAFT_MODEL = "claude-sonnet-4-6"
+    _REFERENCE_MODEL = "claude-haiku-4-5"
+    _BRUTE_FORCE_MODEL = "claude-haiku-4-5"
     _MAX_ATTEMPTS = 3
 
     def __init__(self, api_key: str) -> None:
         self._api_key = api_key
 
-    async def extract_profile(
-        self, resume_text: str, github_signals: GitHubSignals | None
-    ) -> ExtractedProfile:
-        prompt = (
-            "Extract a structured candidate profile from this resume text. "
-            "Respond with strict JSON matching the schema: years_exp (int), "
-            "domains (string list), tech_stack (string list), "
-            "seniority_estimate (string), weak_signals (string list), "
-            "strong_signals (string list).\n\n"
-            f"Resume:\n{resume_text}\n\n"
-            f"GitHub signals: {github_signals}"
-        )
+    async def _call(self, prompt: str, *, model: str, temperature: float = 1.0) -> str:
+        """One structured-output call with bounded retries. Returns the raw
+        response text (callers parse/validate it into their own schema)."""
         last_error: Exception | None = None
         for attempt in range(1, self._MAX_ATTEMPTS + 1):
             started = time.monotonic()
@@ -84,8 +155,9 @@ class AnthropicLLMClient:
                             "content-type": "application/json",
                         },
                         json={
-                            "model": self._MODEL,
-                            "max_tokens": 1024,
+                            "model": model,
+                            "max_tokens": 2048,
+                            "temperature": temperature,
                             "messages": [{"role": "user", "content": prompt}],
                         },
                     )
@@ -96,7 +168,7 @@ class AnthropicLLMClient:
                     "llm_call",
                     extra={
                         "extra_fields": {
-                            "model": self._MODEL,
+                            "model": model,
                             "attempt": attempt,
                             "input_tokens": usage.get("input_tokens"),
                             "output_tokens": usage.get("output_tokens"),
@@ -104,8 +176,8 @@ class AnthropicLLMClient:
                         }
                     },
                 )
-                text = body["content"][0]["text"]
-                return ExtractedProfile.model_validate_json(text)
+                text: str = body["content"][0]["text"]
+                return text
             except (httpx.HTTPError, KeyError, ValueError) as exc:
                 last_error = exc
                 logger.warning(
@@ -114,6 +186,84 @@ class AnthropicLLMClient:
                 )
         assert last_error is not None
         raise last_error
+
+    async def extract_profile(
+        self, resume_text: str, github_signals: GitHubSignals | None
+    ) -> ExtractedProfile:
+        prompt = (
+            "Extract a structured candidate profile from this resume text. "
+            "Respond with strict JSON matching the schema: years_exp (int), "
+            "domains (string list), tech_stack (string list), "
+            "seniority_estimate (string), weak_signals (string list), "
+            "strong_signals (string list).\n\n"
+            f"Resume:\n{resume_text}\n\n"
+            f"GitHub signals: {github_signals}"
+        )
+        text = await self._call(prompt, model=self._DRAFT_MODEL)
+        return ExtractedProfile.model_validate_json(text)
+
+    async def draft_question(
+        self, topic: str, difficulty_band: str, language_targets: list[str]
+    ) -> GeneratedQuestionDraft:
+        prompt = (
+            f"Draft a DSA interview question for topic {topic!r}, difficulty "
+            f"band {difficulty_band!r}. Respond with strict JSON matching: "
+            "title, statement_md, constraints_md, examples (list of "
+            "{input, output}), starter_code (map of language to code for "
+            f"languages {language_targets}), input_spec (list of "
+            "{name, kind: int|int_array|string, min_value, max_value, "
+            "length_min, length_max, charset}) describing each input "
+            "variable in the order it appears on stdin, and difficulty "
+            "(int 1-5). input_spec must be precise enough that a program "
+            "can generate valid random test inputs from it without further "
+            "guidance."
+        )
+        text = await self._call(prompt, model=self._DRAFT_MODEL)
+        return GeneratedQuestionDraft.model_validate_json(text)
+
+    async def generate_solution(self, draft: GeneratedQuestionDraft, role: SolutionRole) -> str:
+        if role == "reference":
+            model, temperature = self._REFERENCE_MODEL, 0.3
+            style = "the optimal approach, with a brief complexity comment"
+        else:
+            model, temperature = self._BRUTE_FORCE_MODEL, 0.9
+            style = (
+                "a straightforward brute-force approach, written independently "
+                "from any optimal solution — do not optimize"
+            )
+        prompt = (
+            f"Problem:\n{draft.statement_md}\n\nConstraints:\n{draft.constraints_md}\n\n"
+            f"Input format (one value per line, in order): "
+            f"{[v.name for v in draft.input_spec]}\n\n"
+            f"Write a complete Python 3 solution reading from stdin and "
+            f"printing to stdout, using {style}. Respond with only the code, "
+            "no markdown fences, no explanation."
+        )
+        return await self._call(prompt, model=model, temperature=temperature)
+
+    async def generate_test_cases(
+        self,
+        draft: GeneratedQuestionDraft,
+        *,
+        edge_count: int,
+        adversarial_count: int,
+        stress_count: int,
+    ) -> list[GeneratedTestCase]:
+        prompt = (
+            f"Problem:\n{draft.statement_md}\n\nConstraints:\n{draft.constraints_md}\n\n"
+            f"Input format (one value per line, in order): "
+            f"{[v.name for v in draft.input_spec]}\n\n"
+            f"Generate exactly {edge_count} edge cases, {adversarial_count} "
+            f"adversarial cases, and {stress_count} stress cases (values "
+            "near the constraint boundaries) — each within the declared "
+            "constraints. Respond with a strict JSON list, each element "
+            '{"input": "...", "description": "...", "case_type": '
+            '"edge"|"adversarial"|"stress"}. `input` must have exactly '
+            f"{len(draft.input_spec)} lines, one per input variable in "
+            "order, no markdown fences, no explanation."
+        )
+        text = await self._call(prompt, model=self._DRAFT_MODEL)
+        return TypeAdapter(list[GeneratedTestCase]).validate_json(text)
 
 
 def get_llm_client() -> LLMClient:

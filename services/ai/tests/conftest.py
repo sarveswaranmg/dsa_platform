@@ -59,7 +59,11 @@ def migrated_db() -> None:
 async def _clean_db(migrated_db: None) -> AsyncIterator[None]:
     yield
     async with get_engine().begin() as connection:
-        await connection.execute(text("TRUNCATE TABLE candidate_profiles"))
+        await connection.execute(
+            text(
+                "TRUNCATE TABLE candidate_profiles, generation_jobs, test_case_generation_jobs"
+            )
+        )
 
 
 @pytest.fixture

@@ -36,6 +36,40 @@ class Settings(BaseSettings):
     # needs no token; "mock" still avoids live network calls in tests/CI.
     github_backend: str = "mock"  # mock | real
 
+    # judge-gen SQS lane (Phase 2 Slice 2) — differential testing during
+    # question generation. Independent of exam's judge-live queues.
+    sqs_endpoint_url: str = "http://localhost:4566"
+    gen_jobs_queue: str = "dsa-judge-gen"
+    gen_results_queue: str = "dsa-judge-gen-results"
+    # Started in the app lifespan; tests leave it off and drive the
+    # message-handling function directly (same pattern as exam's
+    # enable_verdict_consumer).
+    enable_gen_result_consumer: bool = True
+
+    # Question service (HTTP only — no code imports). Used by the generation
+    # results consumer to create a question once solutions agree; the
+    # internal endpoint needs no bearer token (see app/clients/question_service.py).
+    question_service_url: str = "http://localhost:8002"
+
+    # Real inputs (100) would make the test suite extremely slow — tests
+    # override this to something small.
+    generation_input_count: int = 100
+    # Max solution/validation attempts before a generation job is marked
+    # failed (the problem draft itself is only ever generated once).
+    generation_max_attempts: int = 3
+    generation_agreement_threshold: float = 0.95
+
+    # Test-case factory (Phase 2 Slice 3) — candidate counts per case type
+    # for the default (async) variant.
+    testcase_factory_edge_count: int = 10
+    testcase_factory_adversarial_count: int = 10
+    testcase_factory_stress_count: int = 10
+    # On-demand (synchronous) variant, for mid-exam follow-ups: fewer
+    # cases, split evenly-ish across the three types, hard-capped by a
+    # wall-clock deadline. Tests override both to keep the timeout test fast.
+    testcase_factory_sync_case_count: int = 10
+    testcase_factory_sync_timeout_seconds: float = 30.0
+
 
 @lru_cache
 def get_settings() -> Settings:

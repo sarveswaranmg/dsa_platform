@@ -233,6 +233,10 @@ services:
       RS256_PUBLIC_KEY: *rs256-public-key
       S3_ENDPOINT_URL: http://localstack:4566
       S3_PRESIGN_ENDPOINT_URL: http://localhost:4566
+      # judge-gen lane (Phase 2 Slice 2) — publishing DiffJobs and consuming
+      # DiffResults, same localstack queue broker as judge-live.
+      SQS_ENDPOINT_URL: http://localstack:4566
+      QUESTION_SERVICE_URL: http://question:8000
       # Mock by default — no Anthropic key or GitHub token required in dev.
       LLM_BACKEND: ${LLM_BACKEND:-mock}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
@@ -268,6 +272,26 @@ services:
       SCRATCH_ROOT: /tmp/dsa-judge
       # "runc" (default) or "gvisor" — see docs/DECISIONS.md. Left at the
       # default here: gVisor isn't installed in the Docker Desktop VM.
+      JUDGE_RUNTIME: ${JUDGE_RUNTIME:-runc}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /tmp/dsa-judge:/tmp/dsa-judge
+    depends_on:
+      localstack:
+        condition: service_healthy
+
+  # judge-gen worker: differential testing for AI question generation
+  # (Phase 2 Slice 2) — a separate process/queue from `judge` above so
+  # generation load can never delay a candidate's real submission. Same
+  # DooD setup and macOS caveat as `judge`; for local dev on macOS, run
+  # instead:  cd services/judge && uv run python -m app.gen_worker
+  judge-gen:
+    build: ../services/judge
+    command: python -m app.gen_worker
+    environment:
+      SQS_ENDPOINT_URL: http://localstack:4566
+      S3_ENDPOINT_URL: http://localstack:4566
+      SCRATCH_ROOT: /tmp/dsa-judge
       JUDGE_RUNTIME: ${JUDGE_RUNTIME:-runc}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock

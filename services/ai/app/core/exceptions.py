@@ -21,3 +21,8 @@ class Forbidden(DomainError):
 class NotFound(DomainError):
     status_code = 404
     detail = "Resource not found"
+
+
+class UpstreamServiceError(DomainError):
+    status_code = 502
+    detail = "Question service is unavailable"

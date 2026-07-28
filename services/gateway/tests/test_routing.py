@@ -27,7 +27,12 @@ async def test_examiner_routes_reach_the_right_upstream(
         ("/examiners/me", Upstream.EXAM),
         ("/topics", Upstream.QUESTION),
         ("/questions", Upstream.QUESTION),
+        ("/questions/x", Upstream.QUESTION),
         ("/profiles", Upstream.AI),
+        ("/questions/generate", Upstream.AI),
+        ("/questions/generate/job-id", Upstream.AI),
+        ("/test-cases/generate", Upstream.AI),
+        ("/test-cases/generate/job-id", Upstream.AI),
     ]
     for path, upstream in cases:
         response = await client.get(path, headers=examiner_headers())

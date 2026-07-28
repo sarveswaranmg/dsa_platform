@@ -53,6 +53,13 @@ def get_object_bytes(key: str) -> bytes:
     return body.read()
 
 
+def put_object(key: str, body: bytes) -> None:
+    """Server-side upload (direct, not presigned) — used by the generation
+    pipeline to store generated test inputs judge-gen reads back by key."""
+    settings = get_settings()
+    _client(settings.s3_endpoint_url).put_object(Bucket=settings.s3_bucket, Key=key, Body=body)
+
+
 def ensure_bucket() -> None:
     """Create the bucket if missing and allow browser uploads to presigned
     URLs. Dev/test bootstrap only — never called in a request path. In prod the

@@ -51,6 +51,11 @@ ROUTES: tuple[Route, ...] = (
     Route("/questions", Upstream.QUESTION, Policy.EXAMINER),
     # Examiner plane — ai service.
     Route("/profiles", Upstream.AI, Policy.EXAMINER),
+    # Longer/more specific prefix than "/questions" above, so it wins the
+    # longest-prefix match for anything under it while plain /questions and
+    # /questions/{id} still route to QUESTION.
+    Route("/questions/generate", Upstream.AI, Policy.EXAMINER),
+    Route("/test-cases/generate", Upstream.AI, Policy.EXAMINER),
 )
 
 

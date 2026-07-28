@@ -5,76 +5,32 @@ All untrusted execution goes through app.sandbox.build_run_command — the flags
 there are the security contract.
 """
 
-import base64
-import json
 import os
-import secrets
 import shutil
-import subprocess
 import tempfile
-import uuid
-from dataclasses import dataclass
-from typing import Any
 
 from app import compare, s3
 from app.config import get_settings
 from app.contracts import (
     CaseResult,
-    Language,
     SubmissionJob,
     SubmissionStatus,
     Verdict,
     VerdictMessage,
 )
-from app.sandbox import SandboxSpec, build_run_command
-
-# Per-language source filename + image resolver.
-SOURCE_FILENAME = {Language.PYTHON: "main.py", Language.JAVA: "Main.java", Language.CPP: "main.cpp"}
-
-
-def _image(language: Language) -> str:
-    settings = get_settings()
-    return {
-        Language.PYTHON: settings.image_python,
-        Language.JAVA: settings.image_java,
-        Language.CPP: settings.image_cpp,
-    }[language]
-
-
-@dataclass
-class _ContainerOutcome:
-    killed_by_worker: bool  # worker wall-timeout fired
-    docker_returncode: int
-    envelope: dict[str, Any] | None  # decoded run envelope (dynamic JSON)
-    compile_log: str
-
-
-def _run_container(spec: SandboxSpec, *, stdin: bytes, wall_seconds: float) -> _ContainerOutcome:
-    cmd = build_run_command(spec)
-    try:
-        proc = subprocess.run(
-            cmd, input=stdin, capture_output=True, timeout=wall_seconds
-        )
-    except subprocess.TimeoutExpired:
-        # The docker CLI was killed, but the container keeps running — kill it.
-        subprocess.run(["docker", "kill", spec.name], capture_output=True, check=False)
-        return _ContainerOutcome(True, -1, None, "")
-
-    stdout = proc.stdout.decode(errors="replace")
-    envelope: dict[str, Any] | None = None
-    for line in reversed(stdout.splitlines()):
-        line = line.strip()
-        if line.startswith("{"):
-            try:
-                envelope = json.loads(line)
-            except json.JSONDecodeError:
-                envelope = None
-            break
-    return _ContainerOutcome(False, proc.returncode, envelope, stdout)
+from app.exec_common import (
+    SOURCE_FILENAME,
+    ContainerOutcome,
+    container_name,
+    decode_output,
+    image_for,
+    run_container,
+)
+from app.sandbox import SandboxSpec
 
 
 def _verdict_for_case(
-    outcome: _ContainerOutcome, expected: bytes, job: SubmissionJob
+    outcome: ContainerOutcome, expected: bytes, job: SubmissionJob
 ) -> CaseResult:
     limits = job.limits
     if outcome.killed_by_worker:
@@ -104,19 +60,11 @@ def _verdict_for_case(
         verdict = Verdict.RE
     elif env.get("truncated"):
         verdict = Verdict.WA  # output exceeded the cap; cannot be correct
-    elif compare.outputs_match(_decode_output(env), expected, job.compare_mode):
+    elif compare.outputs_match(decode_output(env), expected, job.compare_mode):
         verdict = Verdict.AC
     else:
         verdict = Verdict.WA
     return CaseResult(ordinal=0, verdict=verdict, runtime_ms=runtime_ms, memory_kb=memory_kb)
-
-
-def _decode_output(envelope: dict[str, Any]) -> bytes:
-    return base64.b64decode(str(envelope.get("output_b64", "")))
-
-
-def _name(submission_id: uuid.UUID, stage: str) -> str:
-    return f"dsa-judge-{submission_id.hex[:12]}-{stage}-{secrets.token_hex(3)}"
 
 
 def _summary(cases: list[CaseResult]) -> Verdict:
@@ -140,7 +88,7 @@ def run(job: SubmissionJob) -> VerdictMessage:
             fh.write(job.source)
         os.chmod(source_path, 0o666)
 
-        image = _image(job.language)
+        image = image_for(job.language)
 
         # --- compile stage (writable artifact mount) ---
         compile_spec = SandboxSpec(
@@ -149,12 +97,12 @@ def run(job: SubmissionJob) -> VerdictMessage:
             artifact_dir=workdir,
             memory_mb=max(job.limits.memory_mb, 512),  # compilers are memory-hungry
             pids_limit=job.limits.pids,
-            name=_name(job.submission_id, "compile"),
+            name=container_name(job.submission_id, "compile"),
             writable_artifact=True,
             output_bytes=job.limits.output_bytes,
             runtime=runtime,
         )
-        compile_out = _run_container(
+        compile_out = run_container(
             compile_spec, stdin=b"", wall_seconds=settings.wall_grace_seconds + 20
         )
         if compile_out.killed_by_worker or compile_out.docker_returncode != 0:
@@ -180,13 +128,13 @@ def run(job: SubmissionJob) -> VerdictMessage:
                 artifact_dir=workdir,
                 memory_mb=job.limits.memory_mb,
                 pids_limit=job.limits.pids,
-                name=_name(job.submission_id, f"run-{case.ordinal}"),
+                name=container_name(job.submission_id, f"run-{case.ordinal}"),
                 writable_artifact=False,
                 output_bytes=job.limits.output_bytes,
                 env={"MAX_OUTPUT_BYTES": str(job.limits.output_bytes)},
                 runtime=runtime,
             )
-            outcome = _run_container(run_spec, stdin=stdin, wall_seconds=wall_seconds)
+            outcome = run_container(run_spec, stdin=stdin, wall_seconds=wall_seconds)
             case_result = _verdict_for_case(outcome, expected, job)
             results.append(
                 CaseResult(

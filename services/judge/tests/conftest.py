@@ -82,3 +82,47 @@ class _Uploader:
         self._client.put_object(Bucket=self._bucket, Key=input_key, Body=stdin)  # type: ignore[attr-defined]
         self._client.put_object(Bucket=self._bucket, Key=output_key, Body=expected)  # type: ignore[attr-defined]
         return input_key, output_key
+
+
+@pytest.fixture(scope="session")
+def ai_s3_bucket() -> None:
+    """judge-gen reads generated inputs from the ai service's own bucket
+    (see app/gen_runner.py) — separate from question's s3_bucket above."""
+    settings = get_settings()
+    client = boto3.client(
+        "s3",
+        endpoint_url=settings.s3_endpoint_url,
+        aws_access_key_id=settings.aws_access_key_id,
+        aws_secret_access_key=settings.aws_secret_access_key,
+        region_name=settings.aws_region,
+        config=BotoConfig(s3={"addressing_style": "path"}),
+    )
+    try:
+        client.head_bucket(Bucket=settings.ai_s3_bucket)
+    except client.exceptions.ClientError:
+        client.create_bucket(Bucket=settings.ai_s3_bucket)
+
+
+@pytest.fixture
+def upload_gen_input(ai_s3_bucket: None) -> Iterator["_GenInputUploader"]:
+    settings = get_settings()
+    client = boto3.client(
+        "s3",
+        endpoint_url=settings.s3_endpoint_url,
+        aws_access_key_id=settings.aws_access_key_id,
+        aws_secret_access_key=settings.aws_secret_access_key,
+        region_name=settings.aws_region,
+        config=BotoConfig(s3={"addressing_style": "path"}),
+    )
+    yield _GenInputUploader(client, settings.ai_s3_bucket)
+
+
+class _GenInputUploader:
+    def __init__(self, client: object, bucket: str) -> None:
+        self._client = client
+        self._bucket = bucket
+
+    def __call__(self, stdin: bytes) -> str:
+        key = f"test/{uuid.uuid4()}/input"
+        self._client.put_object(Bucket=self._bucket, Key=key, Body=stdin)  # type: ignore[attr-defined]
+        return key

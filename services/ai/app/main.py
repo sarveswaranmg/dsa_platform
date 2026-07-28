@@ -1,15 +1,18 @@
+import asyncio
+import contextlib
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from app.api.routes import health, profiles
+from app.api.routes import generation, health, profiles, testcase_generation
 from app.core import s3
 from app.core.config import get_settings, validate_production_config
 from app.core.exceptions import DomainError
 from app.core.logging import RequestIdMiddleware, configure_logging
 from app.db.session import dispose_engine
+from app.services.gen_consumer import run_gen_result_consumer
 
 
 @asynccontextmanager
@@ -18,8 +21,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     validate_production_config(get_settings())
     if get_settings().env == "dev":
         s3.ensure_bucket()  # localstack/MinIO bootstrap; prod buckets exist
-    yield
-    await dispose_engine()
+    stop = asyncio.Event()
+    consumer_task: asyncio.Task[None] | None = None
+    if get_settings().enable_gen_result_consumer:
+        consumer_task = asyncio.create_task(run_gen_result_consumer(stop))
+    try:
+        yield
+    finally:
+        stop.set()
+        if consumer_task is not None:
+            consumer_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await consumer_task
+        await dispose_engine()
 
 
 async def domain_error_handler(request: Request, exc: Exception) -> JSONResponse:
@@ -33,6 +47,8 @@ def create_app() -> FastAPI:
     app.add_exception_handler(DomainError, domain_error_handler)
     app.include_router(health.router)
     app.include_router(profiles.router)
+    app.include_router(generation.router)
+    app.include_router(testcase_generation.router)
     return app
 
 

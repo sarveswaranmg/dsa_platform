@@ -23,8 +23,8 @@ def _client() -> "S3Client":
     )
 
 
-def get_object(key: str) -> bytes:
+def get_object(key: str, *, bucket: str | None = None) -> bytes:
     settings = get_settings()
-    response = _client().get_object(Bucket=settings.s3_bucket, Key=key)
+    response = _client().get_object(Bucket=bucket or settings.s3_bucket, Key=key)
     body: bytes = response["Body"].read()
     return body
