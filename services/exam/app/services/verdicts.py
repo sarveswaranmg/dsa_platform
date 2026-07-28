@@ -9,6 +9,7 @@ job (judge re-runs) or a redelivered verdict both collapse to a no-op.
 import logging
 from datetime import UTC, datetime
 
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clients.ai_service import AiServiceClient
@@ -17,6 +18,7 @@ from app.messaging.contracts import VerdictMessage, VerdictStatus
 from app.models.submission import Submission, SubmissionMode, SubmissionStatus
 from app.repositories import sessions as sessions_repo
 from app.repositories import submissions as submissions_repo
+from app.services import session_events
 
 logger = logging.getLogger("exam.verdicts")
 
@@ -28,7 +30,7 @@ _TERMINAL = {
 
 
 async def process_verdict_message(
-    session: AsyncSession, body: str, *, ai_client: AiServiceClient
+    session: AsyncSession, body: str, *, ai_client: AiServiceClient, redis: Redis
 ) -> None:
     message = VerdictMessage.model_validate_json(body)
     if message.request_id:
@@ -65,6 +67,21 @@ async def process_verdict_message(
         submission.status = SubmissionStatus.COMPLETED.value
     submission.summary_verdict = message.summary_verdict
     await session.commit()
+
+    if submission.session_id is not None:
+        await session_events.emit(
+            session,
+            redis,
+            org_id=submission.org_id,
+            session_id=submission.session_id,
+            type="verdict",
+            payload={
+                "submission_id": str(submission.id),
+                "summary_verdict": submission.summary_verdict,
+                "status": submission.status,
+            },
+            question_version_id=submission.question_version_id,
+        )
 
     if submission.mode == SubmissionMode.SUBMIT.value and submission.session_id is not None:
         await _signal_difficulty(session, submission, message, ai_client=ai_client)

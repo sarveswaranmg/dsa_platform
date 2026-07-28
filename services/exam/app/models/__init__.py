@@ -9,6 +9,7 @@ from app.models.examiner import Examiner, Role
 from app.models.invite import Invite, InviteStatus
 from app.models.org import Org
 from app.models.refresh_token import RefreshToken
+from app.models.session_event import SessionEvent
 from app.models.session_question import SessionQuestion
 from app.models.submission import Submission, SubmissionStatus
 
@@ -26,6 +27,7 @@ __all__ = [
     "Org",
     "RefreshToken",
     "Role",
+    "SessionEvent",
     "SessionQuestion",
     "SessionStatus",
     "SlotStatus",

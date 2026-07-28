@@ -74,6 +74,14 @@ class QuestionServiceClient(Protocol):
         self, *, org_id: uuid.UUID, version_id: uuid.UUID
     ) -> VersionContent: ...
 
+    async def create_followup_draft(
+        self, *, org_id: uuid.UUID, question_id: uuid.UUID, constraints_md: str
+    ) -> VersionContent: ...
+
+    async def publish_version(
+        self, *, org_id: uuid.UUID, question_id: uuid.UUID
+    ) -> uuid.UUID: ...
+
 
 class HttpQuestionServiceClient:
     def __init__(self, base_url: str) -> None:
@@ -197,6 +205,52 @@ class HttpQuestionServiceClient:
             memory_limit_mb=item["memory_limit_mb"],
             starter_code=item["starter_code"],
         )
+
+    async def create_followup_draft(
+        self, *, org_id: uuid.UUID, question_id: uuid.UUID, constraints_md: str
+    ) -> VersionContent:
+        # Internal endpoint (Phase 2 Slice 6) — a proctor's mid-exam follow-up
+        # has no ADMIN/AUTHOR token to forward, unlike the examiner-facing
+        # PATCH /questions/{id}. Forks (or mutates in place, if already
+        # unpublished) but never publishes — test cases still need attaching.
+        try:
+            async with httpx.AsyncClient(base_url=self._base_url, timeout=10.0) as client:
+                response = await client.post(
+                    f"/internal/questions/{question_id}/followup-draft",
+                    json={"org_id": str(org_id), "constraints_md": constraints_md},
+                )
+        except httpx.HTTPError as exc:
+            raise UpstreamServiceError() from exc
+        if response.status_code != 200:
+            raise UpstreamServiceError(f"Question service returned {response.status_code}")
+        item = response.json()
+        return VersionContent(
+            version_id=uuid.UUID(item["version_id"]),
+            question_id=uuid.UUID(item["question_id"]),
+            version_number=item["version_number"],
+            title=item["title"],
+            statement_md=item["statement_md"],
+            constraints_md=item["constraints_md"],
+            difficulty=item["difficulty"],
+            time_limit_ms=item["time_limit_ms"],
+            memory_limit_mb=item["memory_limit_mb"],
+            starter_code=item["starter_code"],
+        )
+
+    async def publish_version(self, *, org_id: uuid.UUID, question_id: uuid.UUID) -> uuid.UUID:
+        # Thin internal mirror of POST /questions/{id}/publish — seals a
+        # follow-up's draft (with its test cases now attached) as immutable.
+        try:
+            async with httpx.AsyncClient(base_url=self._base_url, timeout=10.0) as client:
+                response = await client.post(
+                    f"/internal/questions/{question_id}/publish",
+                    json={"org_id": str(org_id)},
+                )
+        except httpx.HTTPError as exc:
+            raise UpstreamServiceError() from exc
+        if response.status_code != 200:
+            raise UpstreamServiceError(f"Question service returned {response.status_code}")
+        return uuid.UUID(response.json()["published_version_id"])
 
 
 def get_question_client() -> QuestionServiceClient:

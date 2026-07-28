@@ -11,6 +11,7 @@ from app.api.routes import (
     difficulty,
     generation,
     health,
+    internal_testcases,
     profiles,
     testcase_generation,
 )
@@ -60,6 +61,7 @@ def create_app() -> FastAPI:
     app.include_router(testcase_generation.router)
     app.include_router(blueprints.router)
     app.include_router(difficulty.router)
+    app.include_router(internal_testcases.router)
     return app
 
 

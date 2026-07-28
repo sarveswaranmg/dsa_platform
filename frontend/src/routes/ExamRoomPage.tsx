@@ -1,13 +1,16 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 
 import {
+  queryKeys,
   useQuestion,
   useSession,
   useStartSession,
   useSubmission,
   useSubmitCode,
 } from '../api/candidate'
+import { connectCandidateSocket } from '../api/candidateSocket'
 import { ApiError } from '../api/client'
 import type { Language, SubmitMode } from '../api/types'
 import { getExamToken } from '../auth/examToken'
@@ -15,7 +18,10 @@ import { CodeEditor } from '../components/CodeEditor'
 import { Countdown } from '../components/Countdown'
 import { QuestionNav } from '../components/QuestionNav'
 import { QuestionPanel } from '../components/QuestionPanel'
-import { RequirementsChangedBanner } from '../components/RequirementsChangedBanner'
+import {
+  RequirementsChangedBanner,
+  type RequirementsChange,
+} from '../components/RequirementsChangedBanner'
 import { VerdictPanel } from '../components/VerdictPanel'
 
 import './ExamRoomPage.css'
@@ -25,11 +31,14 @@ const draftKey = (ordinal: number, language: Language) =>
 
 export function ExamRoomPage() {
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const [activeOrdinal, setActiveOrdinal] = useState<number | null>(null)
   const [language, setLanguage] = useState<Language>('python')
   const [source, setSource] = useState('')
   const [submissionId, setSubmissionId] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
+  const [requirementsChange, setRequirementsChange] =
+    useState<RequirementsChange | null>(null)
 
   const startSession = useStartSession()
   const session = useSession()
@@ -46,6 +55,34 @@ export function ExamRoomPage() {
     // Idempotent on the server: starts the session or resumes an existing one.
     startMutate()
   }, [navigate, startMutate])
+
+  // Live WebSocket connection (Phase 2 Slice 6): pushes code snapshots for
+  // the proctor's live view, surfaces mid-exam follow-ups and instant
+  // verdict updates. Refs so the 30s snapshot timer always reads the
+  // latest ordinal/source without tearing the connection down on every
+  // keystroke or question switch.
+  const activeOrdinalRef = useRef(activeOrdinal)
+  activeOrdinalRef.current = activeOrdinal
+  const sourceRef = useRef(source)
+  sourceRef.current = source
+  const submissionIdRef = useRef(submissionId)
+  submissionIdRef.current = submissionId
+
+  useEffect(() => {
+    if (!session.data) return
+    const socket = connectCandidateSocket({
+      getOrdinal: () => activeOrdinalRef.current,
+      getSource: () => sourceRef.current,
+      onFollowupPushed: setRequirementsChange,
+      onVerdict: () => {
+        const currentId = submissionIdRef.current
+        if (currentId) {
+          void queryClient.invalidateQueries({ queryKey: queryKeys.submission(currentId) })
+        }
+      },
+    })
+    return () => socket.close()
+  }, [session.data, queryClient])
 
   const questions = useMemo(
     () => session.data?.questions ?? [],
@@ -132,8 +169,10 @@ export function ExamRoomPage() {
         )}
       </header>
 
-      {/* Phase 2 seam: no change is ever supplied in Phase 1. */}
-      <RequirementsChangedBanner change={null} />
+      <RequirementsChangedBanner
+        change={requirementsChange}
+        onDismiss={() => setRequirementsChange(null)}
+      />
 
       {locked && (
         <p className="room__locked" role="alert">

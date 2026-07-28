@@ -12,6 +12,7 @@ from app.api.routes import (
     candidate,
     examiners,
     exams,
+    followups,
     health,
     results,
 )
@@ -21,6 +22,8 @@ from app.core.logging import RequestIdMiddleware, configure_logging
 from app.core.redis import close_redis
 from app.db.session import dispose_engine
 from app.messaging.consumer import run_verdict_consumer
+from app.ws import candidate as candidate_ws
+from app.ws import proctor as proctor_ws
 
 
 @asynccontextmanager
@@ -59,6 +62,9 @@ def create_app() -> FastAPI:
     app.include_router(exams.router)
     app.include_router(results.router)
     app.include_router(candidate.router)
+    app.include_router(followups.router)
+    app.include_router(candidate_ws.router)
+    app.include_router(proctor_ws.router)
     return app
 
 

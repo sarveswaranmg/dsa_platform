@@ -271,6 +271,7 @@ dependencies = [
     { name = "pyjwt" },
     { name = "redis" },
     { name = "uvicorn", extra = ["standard"] },
+    { name = "websockets" },
 ]
 
 [package.dev-dependencies]
@@ -290,6 +291,7 @@ requires-dist = [
     { name = "pyjwt", specifier = ">=2.9" },
     { name = "redis", specifier = ">=5" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
+    { name = "websockets", specifier = ">=13" },
 ]
 
 [package.metadata.requires-dev]

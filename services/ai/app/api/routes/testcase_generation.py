@@ -45,6 +45,7 @@ async def create_testcase_generation(
         llm_client=llm_client,
         publisher=publisher,
         question_client=question_client,
+        source_question_id=body.source_question_id,
     )
     return TestCaseGenerationCreated(id=job.id, status=job.status)
 

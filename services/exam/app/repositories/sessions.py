@@ -124,3 +124,23 @@ async def mark_shown(
     if question is not None and question.shown_at is None:
         question.shown_at = datetime.now(UTC)
         await session.flush()
+
+
+async def update_question_version(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    session_id: uuid.UUID,
+    ordinal: int,
+    question_version_id: uuid.UUID,
+) -> SessionQuestion | None:
+    """Mid-exam follow-up (Phase 2 Slice 6) — re-points an assigned question at
+    a newly-forked, newly-published version. Grading for any submission made
+    from this point on binds to the new version (submissions already read
+    `question_version_id` fresh at submit time, per app/services/sessions.py)."""
+    question = await get_question(session, org_id=org_id, session_id=session_id, ordinal=ordinal)
+    if question is None:
+        return None
+    question.question_version_id = question_version_id
+    await session.flush()
+    return question

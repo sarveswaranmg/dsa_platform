@@ -167,3 +167,104 @@ async def test_internal_create_test_case_scoped_by_org(
     # A different org's question_id doesn't resolve — 404, not 403, so
     # existence isn't leaked across tenants even on this trusted-network route.
     assert response.status_code == 404
+
+
+async def test_followup_draft_forks_a_published_question(
+    client: AsyncClient, author: dict[str, str], org_id: uuid.UUID
+) -> None:
+    question = await create_question_api(client, author)
+    published_version_id = question["current_version"]["id"]
+    await client.post(f"/questions/{question['id']}/publish", headers=author)
+
+    draft = await client.post(
+        f"/internal/questions/{question['id']}/followup-draft",
+        json={"org_id": str(org_id), "constraints_md": "1 <= n <= 10"},
+    )
+    assert draft.status_code == 200, draft.text
+    body = draft.json()
+    assert body["version_id"] != published_version_id  # forked, not mutated
+    assert body["constraints_md"] == "1 <= n <= 10"
+
+    # Published version is untouched.
+    published_content = await client.get(
+        f"/internal/question-versions/{published_version_id}",
+        params={"org_id": str(org_id)},
+    )
+    assert published_content.json()["constraints_md"] != "1 <= n <= 10"
+
+
+async def test_followup_draft_mutates_in_place_before_publish(
+    client: AsyncClient, author: dict[str, str], org_id: uuid.UUID
+) -> None:
+    question = await create_question_api(client, author)
+    await client.post(f"/questions/{question['id']}/publish", headers=author)
+
+    first = (
+        await client.post(
+            f"/internal/questions/{question['id']}/followup-draft",
+            json={"org_id": str(org_id), "constraints_md": "1 <= n <= 10"},
+        )
+    ).json()
+    second = (
+        await client.post(
+            f"/internal/questions/{question['id']}/followup-draft",
+            json={"org_id": str(org_id), "constraints_md": "1 <= n <= 20"},
+        )
+    ).json()
+    # Same draft version both times — no double fork while unpublished.
+    assert first["version_id"] == second["version_id"]
+    assert second["constraints_md"] == "1 <= n <= 20"
+
+
+async def test_followup_publish_flips_published_version(
+    client: AsyncClient, author: dict[str, str], org_id: uuid.UUID
+) -> None:
+    question = await create_question_api(client, author)
+    original_version_id = question["current_version"]["id"]
+    await client.post(f"/questions/{question['id']}/publish", headers=author)
+
+    draft = (
+        await client.post(
+            f"/internal/questions/{question['id']}/followup-draft",
+            json={"org_id": str(org_id), "constraints_md": "1 <= n <= 10"},
+        )
+    ).json()
+
+    published = await client.post(
+        f"/internal/questions/{question['id']}/publish",
+        json={"org_id": str(org_id)},
+    )
+    assert published.status_code == 200, published.text
+    assert published.json()["published_version_id"] == draft["version_id"]
+    assert published.json()["published_version_id"] != original_version_id
+
+
+async def test_followup_test_case_attach_does_not_double_fork(
+    client: AsyncClient, author: dict[str, str], org_id: uuid.UUID
+) -> None:
+    question = await create_question_api(client, author)
+    await client.post(f"/questions/{question['id']}/publish", headers=author)
+
+    draft = (
+        await client.post(
+            f"/internal/questions/{question['id']}/followup-draft",
+            json={"org_id": str(org_id), "constraints_md": "1 <= n <= 10"},
+        )
+    ).json()
+
+    await client.post(
+        f"/internal/questions/{question['id']}/test-cases",
+        json={"org_id": str(org_id), "is_sample": True},
+    )
+    await client.post(
+        f"/internal/questions/{question['id']}/test-cases",
+        json={"org_id": str(org_id), "is_sample": False},
+    )
+
+    detail = await client.get(f"/questions/{question['id']}", headers=author)
+    # Still the same single draft version — attaching test cases while
+    # unpublished must not trigger another fork.
+    assert detail.json()["current_version"]["id"] == draft["version_id"]
+
+    test_cases = await client.get(f"/questions/{question['id']}/test-cases", headers=author)
+    assert len(test_cases.json()) == 2

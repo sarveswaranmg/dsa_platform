@@ -1,6 +1,7 @@
 import uuid
 from datetime import UTC, datetime, timedelta
 
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clients.question_service import (
@@ -50,6 +51,14 @@ class FakeQuestionClient:
     ) -> VersionContent:
         raise NotImplementedError
 
+    async def create_followup_draft(
+        self, *, org_id: uuid.UUID, question_id: uuid.UUID, constraints_md: str
+    ) -> VersionContent:
+        raise NotImplementedError
+
+    async def publish_version(self, *, org_id: uuid.UUID, question_id: uuid.UUID) -> uuid.UUID:
+        raise NotImplementedError
+
 
 class FakePublisher:
     def __init__(self) -> None:
@@ -92,7 +101,9 @@ _KEYS = [
 ]
 
 
-async def test_enqueue_builds_correct_job(db_session: AsyncSession) -> None:
+async def test_enqueue_builds_correct_job(
+    db_session: AsyncSession, redis_client: Redis
+) -> None:
     org_id = uuid.uuid4()
     exam_id = await _make_exam(db_session, org_id)
     version_id = uuid.uuid4()
@@ -102,6 +113,7 @@ async def test_enqueue_builds_correct_job(db_session: AsyncSession) -> None:
         db_session,
         FakeQuestionClient(_KEYS),
         publisher,
+        redis_client,
         org_id=org_id,
         exam_id=exam_id,
         question_version_id=version_id,
@@ -121,7 +133,9 @@ async def test_enqueue_builds_correct_job(db_session: AsyncSession) -> None:
     assert job.cases[0].input_s3_key == "k/1/in"
 
 
-async def test_enqueue_rejects_missing_exam(db_session: AsyncSession) -> None:
+async def test_enqueue_rejects_missing_exam(
+    db_session: AsyncSession, redis_client: Redis
+) -> None:
     from app.core.exceptions import NotFound
 
     publisher = FakePublisher()
@@ -130,6 +144,7 @@ async def test_enqueue_rejects_missing_exam(db_session: AsyncSession) -> None:
             db_session,
             FakeQuestionClient(_KEYS),
             publisher,
+            redis_client,
             org_id=uuid.uuid4(),
             exam_id=uuid.uuid4(),
             question_version_id=uuid.uuid4(),
@@ -143,7 +158,7 @@ async def test_enqueue_rejects_missing_exam(db_session: AsyncSession) -> None:
 
 
 async def test_verdict_persistence_and_idempotency(
-    db_session: AsyncSession, fake_ai_client: FakeAiServiceClient
+    db_session: AsyncSession, fake_ai_client: FakeAiServiceClient, redis_client: Redis
 ) -> None:
     org_id = uuid.uuid4()
     exam_id = await _make_exam(db_session, org_id)
@@ -151,6 +166,7 @@ async def test_verdict_persistence_and_idempotency(
         db_session,
         FakeQuestionClient(_KEYS),
         FakePublisher(),
+        redis_client,
         org_id=org_id,
         exam_id=exam_id,
         question_version_id=uuid.uuid4(),
@@ -170,7 +186,7 @@ async def test_verdict_persistence_and_idempotency(
     )
 
     await process_verdict_message(
-        db_session, message.model_dump_json(), ai_client=fake_ai_client
+        db_session, message.model_dump_json(), ai_client=fake_ai_client, redis=redis_client
     )
     reloaded = await submissions_repo.get_by_id(
         db_session, org_id=org_id, submission_id=submission.id
@@ -185,7 +201,7 @@ async def test_verdict_persistence_and_idempotency(
 
     # Re-deliver the same verdict: no duplicate rows, still terminal.
     await process_verdict_message(
-        db_session, message.model_dump_json(), ai_client=fake_ai_client
+        db_session, message.model_dump_json(), ai_client=fake_ai_client, redis=redis_client
     )
     verdicts_again = await submissions_repo.list_case_verdicts(
         db_session, org_id=org_id, submission_id=submission.id
@@ -194,7 +210,7 @@ async def test_verdict_persistence_and_idempotency(
 
 
 async def test_compile_error_verdict(
-    db_session: AsyncSession, fake_ai_client: FakeAiServiceClient
+    db_session: AsyncSession, fake_ai_client: FakeAiServiceClient, redis_client: Redis
 ) -> None:
     org_id = uuid.uuid4()
     exam_id = await _make_exam(db_session, org_id)
@@ -202,6 +218,7 @@ async def test_compile_error_verdict(
         db_session,
         FakeQuestionClient(_KEYS),
         FakePublisher(),
+        redis_client,
         org_id=org_id,
         exam_id=exam_id,
         question_version_id=uuid.uuid4(),
@@ -217,7 +234,7 @@ async def test_compile_error_verdict(
         cases=[],
     )
     await process_verdict_message(
-        db_session, message.model_dump_json(), ai_client=fake_ai_client
+        db_session, message.model_dump_json(), ai_client=fake_ai_client, redis=redis_client
     )
     reloaded = await submissions_repo.get_by_id(
         db_session, org_id=org_id, submission_id=submission.id
@@ -228,7 +245,7 @@ async def test_compile_error_verdict(
 
 
 async def test_verdict_org_mismatch_dropped(
-    db_session: AsyncSession, fake_ai_client: FakeAiServiceClient
+    db_session: AsyncSession, fake_ai_client: FakeAiServiceClient, redis_client: Redis
 ) -> None:
     org_id = uuid.uuid4()
     exam_id = await _make_exam(db_session, org_id)
@@ -236,6 +253,7 @@ async def test_verdict_org_mismatch_dropped(
         db_session,
         FakeQuestionClient(_KEYS),
         FakePublisher(),
+        redis_client,
         org_id=org_id,
         exam_id=exam_id,
         question_version_id=uuid.uuid4(),
@@ -251,7 +269,7 @@ async def test_verdict_org_mismatch_dropped(
         cases=[CaseResult(ordinal=1, verdict="AC", runtime_ms=1, memory_kb=1)],
     )
     await process_verdict_message(
-        db_session, message.model_dump_json(), ai_client=fake_ai_client
+        db_session, message.model_dump_json(), ai_client=fake_ai_client, redis=redis_client
     )
     reloaded = await submissions_repo.get_by_id(
         db_session, org_id=org_id, submission_id=submission.id

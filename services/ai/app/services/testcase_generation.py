@@ -70,10 +70,20 @@ async def start_factory_job(
     llm_client: LLMClient,
     publisher: QueuePublisher,
     question_client: QuestionServiceClient,
+    source_question_id: uuid.UUID | None = None,
 ) -> TestCaseGenerationJob:
-    source_job = await generation_jobs_repo.get_succeeded_by_version(
-        session, org_id=org_id, question_version_id=question_version_id
-    )
+    # Mid-exam follow-up (Phase 2 Slice 6): the copy-on-write draft version
+    # has no generation_jobs row of its own — fall back to the latest
+    # succeeded job for the underlying question (any version) as the source
+    # of the reference/brute-force solution and draft input_spec.
+    if source_question_id is not None:
+        source_job = await generation_jobs_repo.get_succeeded_by_question(
+            session, org_id=org_id, question_id=source_question_id
+        )
+    else:
+        source_job = await generation_jobs_repo.get_succeeded_by_version(
+            session, org_id=org_id, question_version_id=question_version_id
+        )
     if source_job is None:
         raise NotFound(
             "No succeeded generation job produced this question version — "

@@ -46,6 +46,10 @@ ROUTES: tuple[Route, ...] = (
     Route("/blueprints", Upstream.EXAM, Policy.EXAMINER),
     Route("/exams", Upstream.EXAM, Policy.EXAMINER),
     Route("/submissions", Upstream.EXAM, Policy.EXAMINER),
+    # Mid-exam follow-ups, replay, and the proctor WebSocket channel (Phase 2
+    # Slice 6). The candidate WebSocket channel reuses the existing
+    # /candidate prefix below.
+    Route("/sessions", Upstream.EXAM, Policy.EXAMINER),
     # Examiner plane — question service.
     Route("/topics", Upstream.QUESTION, Policy.EXAMINER),
     Route("/questions", Upstream.QUESTION, Policy.EXAMINER),

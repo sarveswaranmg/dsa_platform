@@ -15,6 +15,7 @@ import jwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
 from cryptography.hazmat.primitives.serialization import load_pem_private_key
+from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from app.auth import Identity
@@ -87,12 +88,15 @@ def rate_limiter() -> CountingRateLimiter:
 
 
 @pytest.fixture
-async def client(
-    forwarder: FakeForwarder, rate_limiter: CountingRateLimiter
-) -> AsyncIterator[AsyncClient]:
-    app = create_app()
-    app.dependency_overrides[get_forwarder] = lambda: forwarder
-    app.dependency_overrides[get_rate_limiter] = lambda: rate_limiter
+def app(forwarder: FakeForwarder, rate_limiter: CountingRateLimiter) -> FastAPI:
+    application = create_app()
+    application.dependency_overrides[get_forwarder] = lambda: forwarder
+    application.dependency_overrides[get_rate_limiter] = lambda: rate_limiter
+    return application
+
+
+@pytest.fixture
+async def client(app: FastAPI) -> AsyncIterator[AsyncClient]:
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://gw") as http_client:
         yield http_client

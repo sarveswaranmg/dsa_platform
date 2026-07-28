@@ -13,6 +13,7 @@ from app.logging import RequestIdMiddleware, configure_logging, current_request_
 from app.proxy import Forwarder
 from app.rate_limit import RateLimiter
 from app.routing import Policy, match_route
+from app.ws_proxy import register_ws_routes
 
 logger = logging.getLogger("gateway.access")
 
@@ -122,6 +123,7 @@ def create_app() -> FastAPI:
             headers=passthrough,
         )
 
+    register_ws_routes(app)
     return app
 
 

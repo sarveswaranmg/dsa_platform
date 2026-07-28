@@ -1,5 +1,6 @@
 import uuid
 
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clients.question_service import QuestionServiceClient
@@ -12,6 +13,7 @@ from app.models.case_verdict import CaseVerdict
 from app.models.submission import Submission, SubmissionMode, SubmissionStatus
 from app.repositories import exams as exams_repo
 from app.repositories import submissions as submissions_repo
+from app.services import session_events
 
 # Phase-1 defaults; per-question limits will flow through in a later slice.
 DEFAULT_TIME_MS = 2000
@@ -22,6 +24,7 @@ async def create_and_enqueue(
     session: AsyncSession,
     question_client: QuestionServiceClient,
     publisher: QueuePublisher,
+    redis: Redis,
     *,
     org_id: uuid.UUID,
     exam_id: uuid.UUID,
@@ -80,6 +83,17 @@ async def create_and_enqueue(
         request_id=current_request_id(),  # trace across the queue into the judge
     )
     publisher.send(get_settings().submissions_queue, job.model_dump_json())
+
+    if session_id is not None:
+        await session_events.emit(
+            session,
+            redis,
+            org_id=org_id,
+            session_id=session_id,
+            type="submission",
+            payload={"submission_id": str(submission.id), "language": language, "mode": mode},
+            question_version_id=question_version_id,
+        )
     return submission
 
 

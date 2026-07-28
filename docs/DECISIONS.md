@@ -3,6 +3,78 @@
 Short, dated records of significant technical decisions and the reasoning
 behind them. Newest first.
 
+## Live proctoring: real WS proxying at the gateway, event-sourced sessions, lineage-based follow-up test cases (2026-07-29)
+
+**Decision:** Phase 2 Slice 6 adds WebSocket infrastructure end to end —
+`services/exam` gains a candidate channel (`WS /candidate/session/ws`,
+bidirectional: accepts `code_snapshot` frames, pushes `verdict`/
+`followup_pushed`) and a proctor channel (`WS
+/sessions/{id}/proctor-ws`, observer-only), both backed by Redis pub/sub
+(`ex:session-events:{session_id}`) for live fan-out. `services/gateway`
+proxies both **as real WebSocket connections**, not a direct-to-exam
+bypass — a new `app/ws_proxy.py` validates the handshake (token +
+role/policy, via the same `authorise()` primitives the HTTP path already
+uses) before `accept()`, then pumps frames both directions via
+`websockets` as an outbound client. This preserves the
+"gateway is the only published entry point" invariant every prior slice
+has held, at the cost of a new `websockets` dependency in gateway (`httpx`
+cannot proxy WebSockets).
+
+Every session is now event-sourced: a new append-only `session_events`
+table (`seq` per session, `type`, `payload`, optional
+`question_version_id`) records `question_assigned`, `code_snapshot`,
+`submission`, `verdict`, and `followup_pushed`, replayable in full via
+`GET /sessions/{id}/replay` (`Role.REVIEWER`-gated). A proctor can push a
+mid-exam follow-up (`POST /sessions/{id}/followup`, `Role.PROCTOR`-gated)
+that forks the question's immutable version (copy-on-write, question
+service), regenerates test cases, republishes, and re-points the
+session's assigned question — grading of any submission from that point
+on binds to the new version automatically, since submission already
+reads `question_version_id` fresh off the session at submit time.
+
+**Follow-up test-case regeneration works by lineage, not exact version
+match.** A follow-up's forked version has no `generation_jobs` row of
+its own (that row belongs to whichever version was originally
+AI-generated), so `ai` gained `get_succeeded_by_question` — latest
+succeeded job for a `question_id` across *all* its versions — and a new
+unauthenticated `POST /internal/test-cases/generate` route (mirroring
+`app/api/routes/difficulty.py`'s existing shape) so exam's follow-up flow
+can call it without an examiner bearer token. A purely manual (Phase 1)
+question has no AI lineage at all: `push_followup` wraps the factory
+call in try/except and never blocks on failure, since
+`ensure_mutable_version`'s copy-on-write already carries the prior
+version's test cases forward (S3 keys are immutable uploads, safe to
+reuse) — so a follow-up on a manual question still ships usable, if
+unchanged, test cases.
+
+**Why real WS proxying over a bypass:** a direct-to-exam WebSocket would
+be the first thing in this codebase reachable without going through the
+gateway's auth/rate-limit/routing table — confirmed with the user this
+was worth the extra `websockets` dependency and proxy code rather than
+carving out an exception to the "gateway is the only edge" rule.
+
+**Why query-param tokens for the WS handshake:** the native browser
+`WebSocket` API cannot set custom headers, so both channels take
+`?token=...` instead of `Authorization: Bearer`, decoded directly via the
+existing `decode_candidate_exam_token`/`decode_access_token` functions
+(already request-object-agnostic, reusable as-is outside the
+`HTTPBearer`/`Depends` extraction the HTTP routes use).
+
+**Status:** Implemented and verified end-to-end through the real stack
+(gateway → exam WS relay in both directions, proctor push → candidate
+live notification → grading against the new version → full ordered
+replay). One testing-infrastructure limitation surfaced, not a product
+gap: Starlette's `TestClient` runs the ASGI app in a background thread
+with its own event loop, so the exam service's savepoint-based
+`db_session` test fixture (bound to the main test loop) cannot be shared
+with it — `httpx-ws` was tried and abandoned (`httpx.ASGITransport`
+hardcodes `scope["type"] = "http"`, no WebSocket scope support at all).
+Exam's new WS pytest coverage is therefore scoped to handshake-only
+rejection paths (missing/invalid token, wrong role) that never reach a
+DB query; the full connected flow (session lookups, event recording,
+bidirectional forwarding) is proven by the real end-to-end run above
+instead of a mocked unit test.
+
 ## Adaptive difficulty: engine only, no live question re-selection yet (2026-07-28)
 
 **Decision:** Phase 2 Slice 5's difficulty engine (`ai`'s new `POST

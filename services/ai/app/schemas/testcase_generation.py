@@ -7,6 +7,10 @@ from pydantic import BaseModel
 class TestCaseGenerationRequest(BaseModel):
     question_version_id: uuid.UUID
     synchronous: bool = False
+    # Mid-exam follow-up (Phase 2 Slice 6): the copy-on-write draft version
+    # has no generation_jobs row of its own, so the factory looks up the
+    # latest succeeded job for this underlying question instead.
+    source_question_id: uuid.UUID | None = None
 
 
 class TestCaseGenerationCreated(BaseModel):

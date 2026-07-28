@@ -1,6 +1,7 @@
 import uuid
 
 from httpx import AsyncClient
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.messaging.contracts import CaseResult, VerdictMessage, VerdictStatus
@@ -17,6 +18,7 @@ async def test_submit_ac_verdict_signals_difficulty_and_records_band(
     fake_question_client: FakeQuestionClient,
     fake_ai_client: FakeAiServiceClient,
     org_id: uuid.UUID,
+    redis_client: Redis,
 ) -> None:
     exam = await _setup_exam(db_session, fake_question_client, org_id)
     headers = _headers(exam)
@@ -40,7 +42,7 @@ async def test_submit_ac_verdict_signals_difficulty_and_records_band(
         cases=[CaseResult(ordinal=1, verdict="AC", runtime_ms=10, memory_kb=1000)],
     )
     await process_verdict_message(
-        db_session, message.model_dump_json(), ai_client=fake_ai_client
+        db_session, message.model_dump_json(), ai_client=fake_ai_client, redis=redis_client
     )
 
     assert len(fake_ai_client.difficulty_signals) == 1
@@ -68,6 +70,7 @@ async def test_run_mode_submission_never_signals_difficulty(
     fake_question_client: FakeQuestionClient,
     fake_ai_client: FakeAiServiceClient,
     org_id: uuid.UUID,
+    redis_client: Redis,
 ) -> None:
     exam = await _setup_exam(db_session, fake_question_client, org_id)
     headers = _headers(exam)
@@ -89,7 +92,7 @@ async def test_run_mode_submission_never_signals_difficulty(
         cases=[CaseResult(ordinal=1, verdict="AC", runtime_ms=10, memory_kb=1000)],
     )
     await process_verdict_message(
-        db_session, message.model_dump_json(), ai_client=fake_ai_client
+        db_session, message.model_dump_json(), ai_client=fake_ai_client, redis=redis_client
     )
 
     assert fake_ai_client.difficulty_signals == []
@@ -101,6 +104,7 @@ async def test_unreachable_ai_does_not_break_verdict_persistence(
     fake_question_client: FakeQuestionClient,
     fake_ai_client: FakeAiServiceClient,
     org_id: uuid.UUID,
+    redis_client: Redis,
 ) -> None:
     fake_ai_client.difficulty_signal_error = RuntimeError("ai is down")
     exam = await _setup_exam(db_session, fake_question_client, org_id)
@@ -125,7 +129,7 @@ async def test_unreachable_ai_does_not_break_verdict_persistence(
     )
     # Must not raise despite the fake ai_client raising internally.
     await process_verdict_message(
-        db_session, message.model_dump_json(), ai_client=fake_ai_client
+        db_session, message.model_dump_json(), ai_client=fake_ai_client, redis=redis_client
     )
 
     reloaded = await submissions_repo.get_by_id(

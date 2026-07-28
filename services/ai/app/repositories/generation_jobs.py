@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.generation_job import GenerationJob, GenerationStatus
@@ -49,5 +49,25 @@ async def get_succeeded_by_version(
             GenerationJob.org_id == org_id,
             GenerationJob.status == GenerationStatus.SUCCEEDED,
         )
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_succeeded_by_question(
+    session: AsyncSession, *, org_id: uuid.UUID, question_id: uuid.UUID
+) -> GenerationJob | None:
+    """Lineage lookup (Phase 2 Slice 6): a mid-exam follow-up's copy-on-write
+    version never has its own generation_jobs row, so the factory falls back
+    to the latest succeeded job for the underlying question (any version) to
+    source a reference/brute-force solution and draft input_spec."""
+    result = await session.execute(
+        select(GenerationJob)
+        .where(
+            GenerationJob.question_id == question_id,
+            GenerationJob.org_id == org_id,
+            GenerationJob.status == GenerationStatus.SUCCEEDED,
+        )
+        .order_by(desc(GenerationJob.created_at))
+        .limit(1)
     )
     return result.scalar_one_or_none()

@@ -11,6 +11,7 @@ os.environ.setdefault("RS256_PRIVATE_KEY", (_DEV_KEYS / "rs256-private.pem").rea
 import pyotp
 import pytest
 from alembic.config import Config
+from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
@@ -20,6 +21,7 @@ from alembic import command
 from app.clients.ai_service import (
     BlueprintSpec,
     DifficultySignal,
+    FollowupFactoryResult,
     GenerationStatus,
     get_ai_client,
 )
@@ -153,6 +155,13 @@ class FakeQuestionClient:
         self.test_case_keys: dict[uuid.UUID, list[TestCaseKeys]] = {}
         self.seen_authorizations: list[str] = []
         self.topics: list[TopicRef] = []
+        # Phase 2 Slice 6 follow-up flow: question_id -> its current
+        # unpublished draft version_id (mirrors question service's
+        # fork-once/mutate-in-place-until-published semantics, tested for
+        # real in services/question/tests/test_internal.py).
+        self._draft_version_by_question: dict[uuid.UUID, uuid.UUID] = {}
+        self.followup_draft_calls: list[dict[str, object]] = []
+        self.publish_calls: list[uuid.UUID] = []
 
     def set_pool(self, topic_id: uuid.UUID, refs: list[QuestionRef]) -> None:
         self.pools[topic_id] = refs
@@ -216,6 +225,37 @@ class FakeQuestionClient:
     ) -> list[TestCaseKeys]:
         return self.test_case_keys.get(version_id, [])
 
+    async def create_followup_draft(
+        self, *, org_id: uuid.UUID, question_id: uuid.UUID, constraints_md: str
+    ) -> VersionContent:
+        self.followup_draft_calls.append(
+            {"question_id": question_id, "constraints_md": constraints_md}
+        )
+        draft_version_id = self._draft_version_by_question.get(question_id)
+        if draft_version_id is None:
+            draft_version_id = uuid.uuid4()
+            self._draft_version_by_question[question_id] = draft_version_id
+        content = VersionContent(
+            version_id=draft_version_id,
+            question_id=question_id,
+            version_number=2,
+            title="Follow-up draft",
+            statement_md="Statement.",
+            constraints_md=constraints_md,
+            difficulty=1,
+            time_limit_ms=2000,
+            memory_limit_mb=256,
+            starter_code={"python": "pass\n"},
+        )
+        self.set_version(content)
+        return content
+
+    async def publish_version(self, *, org_id: uuid.UUID, question_id: uuid.UUID) -> uuid.UUID:
+        self.publish_calls.append(question_id)
+        draft_version_id = self._draft_version_by_question.pop(question_id, None)
+        assert draft_version_id is not None, "no follow-up draft to publish"
+        return draft_version_id
+
 
 @pytest.fixture
 def fake_question_client() -> FakeQuestionClient:
@@ -236,6 +276,9 @@ class FakeAiServiceClient:
         self.difficulty_signals: list[dict[str, object]] = []
         self.difficulty_response = DifficultySignal(difficulty=3.0, difficulty_band="medium")
         self.difficulty_signal_error: Exception | None = None
+        self.followup_factory_calls: list[dict[str, object]] = []
+        self.followup_factory_response = FollowupFactoryResult(status="succeeded")
+        self.followup_factory_error: Exception | None = None
 
     def set_blueprint_spec(self, spec: BlueprintSpec) -> None:
         self.blueprint_spec = spec
@@ -307,6 +350,20 @@ class FakeAiServiceClient:
             raise self.difficulty_signal_error
         return self.difficulty_response
 
+    async def run_followup_factory(
+        self,
+        *,
+        org_id: uuid.UUID,
+        question_version_id: uuid.UUID,
+        source_question_id: uuid.UUID,
+    ) -> FollowupFactoryResult:
+        self.followup_factory_calls.append(
+            {"question_version_id": question_version_id, "source_question_id": source_question_id}
+        )
+        if self.followup_factory_error is not None:
+            raise self.followup_factory_error
+        return self.followup_factory_response
+
 
 @pytest.fixture
 def fake_ai_client() -> FakeAiServiceClient:
@@ -373,25 +430,30 @@ async def redis_client() -> AsyncIterator[Redis]:
 
 
 @pytest.fixture
-async def client(
+def app(
     db_session: AsyncSession,
     fake_question_client: FakeQuestionClient,
     fake_ai_client: FakeAiServiceClient,
     fake_email_sender: FakeEmailSender,
     fake_oidc_verifier: FakeGoogleVerifier,
     redis_client: Redis,
-) -> AsyncIterator[AsyncClient]:
-    app = create_app()
+) -> FastAPI:
+    application = create_app()
 
     async def override_get_db() -> AsyncIterator[AsyncSession]:
         yield db_session
 
-    app.dependency_overrides[get_db] = override_get_db
-    app.dependency_overrides[get_question_client] = lambda: fake_question_client
-    app.dependency_overrides[get_ai_client] = lambda: fake_ai_client
-    app.dependency_overrides[get_redis] = lambda: redis_client
-    app.dependency_overrides[get_email_sender] = lambda: fake_email_sender
-    app.dependency_overrides[get_oidc_verifier] = lambda: fake_oidc_verifier
+    application.dependency_overrides[get_db] = override_get_db
+    application.dependency_overrides[get_question_client] = lambda: fake_question_client
+    application.dependency_overrides[get_ai_client] = lambda: fake_ai_client
+    application.dependency_overrides[get_redis] = lambda: redis_client
+    application.dependency_overrides[get_email_sender] = lambda: fake_email_sender
+    application.dependency_overrides[get_oidc_verifier] = lambda: fake_oidc_verifier
+    return application
+
+
+@pytest.fixture
+async def client(app: FastAPI) -> AsyncIterator[AsyncClient]:
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as http_client:
         yield http_client

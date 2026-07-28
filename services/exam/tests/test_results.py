@@ -1,6 +1,7 @@
 import uuid
 
 from httpx import AsyncClient
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.messaging.contracts import (
@@ -23,6 +24,7 @@ async def _submitted_exam(
     fake_question_client: FakeQuestionClient,
     org_id: uuid.UUID,
     fake_ai_client: FakeAiServiceClient,
+    redis_client: Redis,
 ) -> tuple[uuid.UUID, uuid.UUID]:
     """Start a session, submit once, and persist a verdict. Returns
     (exam_id, submission_id)."""
@@ -36,6 +38,7 @@ async def _submitted_exam(
         db_session,
         fake_question_client,
         FakePublisher(),
+        redis_client,
         org_id=org_id,
         exam_id=exam.id,
         question_version_id=uuid.UUID(assigned_version),
@@ -53,7 +56,7 @@ async def _submitted_exam(
         ],
     )
     await process_verdict_message(
-        db_session, message.model_dump_json(), ai_client=fake_ai_client
+        db_session, message.model_dump_json(), ai_client=fake_ai_client, redis=redis_client
     )
     return exam.id, submission.id
 
@@ -64,9 +67,10 @@ async def test_lists_submissions_for_an_exam(
     fake_question_client: FakeQuestionClient,
     org_id: uuid.UUID,
     fake_ai_client: FakeAiServiceClient,
+    redis_client: Redis,
 ) -> None:
     exam_id, submission_id = await _submitted_exam(
-        client, db_session, fake_question_client, org_id, fake_ai_client
+        client, db_session, fake_question_client, org_id, fake_ai_client, redis_client
     )
     response = await client.get(
         f"/exams/{exam_id}/submissions", headers=auth_headers(org_id, Role.REVIEWER)
@@ -85,9 +89,10 @@ async def test_detail_returns_code_and_case_verdicts(
     fake_question_client: FakeQuestionClient,
     org_id: uuid.UUID,
     fake_ai_client: FakeAiServiceClient,
+    redis_client: Redis,
 ) -> None:
     _, submission_id = await _submitted_exam(
-        client, db_session, fake_question_client, org_id, fake_ai_client
+        client, db_session, fake_question_client, org_id, fake_ai_client, redis_client
     )
     response = await client.get(
         f"/submissions/{submission_id}", headers=auth_headers(org_id, Role.REVIEWER)
@@ -106,9 +111,10 @@ async def test_admin_and_proctor_may_read_results(
     fake_question_client: FakeQuestionClient,
     org_id: uuid.UUID,
     fake_ai_client: FakeAiServiceClient,
+    redis_client: Redis,
 ) -> None:
     exam_id, _ = await _submitted_exam(
-        client, db_session, fake_question_client, org_id, fake_ai_client
+        client, db_session, fake_question_client, org_id, fake_ai_client, redis_client
     )
     for role in (Role.ADMIN, Role.PROCTOR):
         response = await client.get(
@@ -123,9 +129,10 @@ async def test_author_is_denied_results(
     fake_question_client: FakeQuestionClient,
     org_id: uuid.UUID,
     fake_ai_client: FakeAiServiceClient,
+    redis_client: Redis,
 ) -> None:
     exam_id, submission_id = await _submitted_exam(
-        client, db_session, fake_question_client, org_id, fake_ai_client
+        client, db_session, fake_question_client, org_id, fake_ai_client, redis_client
     )
     listed = await client.get(
         f"/exams/{exam_id}/submissions", headers=auth_headers(org_id, Role.AUTHOR)
@@ -143,9 +150,10 @@ async def test_cross_org_results_are_not_found(
     fake_question_client: FakeQuestionClient,
     org_id: uuid.UUID,
     fake_ai_client: FakeAiServiceClient,
+    redis_client: Redis,
 ) -> None:
     exam_id, submission_id = await _submitted_exam(
-        client, db_session, fake_question_client, org_id, fake_ai_client
+        client, db_session, fake_question_client, org_id, fake_ai_client, redis_client
     )
     other = auth_headers(uuid.uuid4(), Role.REVIEWER)
     assert (await client.get(f"/exams/{exam_id}/submissions", headers=other)).status_code == 404

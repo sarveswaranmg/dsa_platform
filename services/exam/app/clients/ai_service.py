@@ -40,6 +40,11 @@ class DifficultySignal:
     difficulty_band: str
 
 
+@dataclass(frozen=True)
+class FollowupFactoryResult:
+    status: str
+
+
 class AiServiceClient(Protocol):
     """The exam service reaches the ai service over HTTP only (no code
     imports). Examiner-plane calls (`propose_blueprint`, `generate_question`,
@@ -83,6 +88,14 @@ class AiServiceClient(Protocol):
         verdict: str,
         complexity_hint: str | None,
     ) -> DifficultySignal: ...
+
+    async def run_followup_factory(
+        self,
+        *,
+        org_id: uuid.UUID,
+        question_version_id: uuid.UUID,
+        source_question_id: uuid.UUID,
+    ) -> FollowupFactoryResult: ...
 
 
 class HttpAiServiceClient:
@@ -203,6 +216,31 @@ class HttpAiServiceClient:
         return DifficultySignal(
             difficulty=item["difficulty"], difficulty_band=item["difficulty_band"]
         )
+
+    async def run_followup_factory(
+        self,
+        *,
+        org_id: uuid.UUID,
+        question_version_id: uuid.UUID,
+        source_question_id: uuid.UUID,
+    ) -> FollowupFactoryResult:
+        # No authorization param (internal/unauthenticated) — a proctor's
+        # follow-up has no ADMIN/AUTHOR token to forward to the examiner-facing
+        # POST /test-cases/generate. Always runs synchronously (~30s budget)
+        # since the result must be attached before the version is published.
+        body = {
+            "org_id": str(org_id),
+            "question_version_id": str(question_version_id),
+            "source_question_id": str(source_question_id),
+        }
+        try:
+            async with httpx.AsyncClient(base_url=self._base_url, timeout=35.0) as client:
+                response = await client.post("/internal/test-cases/generate", json=body)
+        except httpx.HTTPError as exc:
+            raise UpstreamServiceError("AI service is unavailable") from exc
+        if response.status_code != 201:
+            raise UpstreamServiceError(f"AI service returned {response.status_code}")
+        return FollowupFactoryResult(status=response.json()["status"])
 
 
 def get_ai_client() -> AiServiceClient:

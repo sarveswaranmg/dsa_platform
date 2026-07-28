@@ -193,3 +193,69 @@ async def create_test_case(
         upload_input_url=upload_input_url,
         upload_output_url=upload_output_url,
     )
+
+
+class InternalFollowupDraftCreate(BaseModel):
+    org_id: uuid.UUID
+    constraints_md: str
+
+
+@router.post(
+    "/questions/{question_id}/followup-draft",
+    response_model=InternalVersionContent,
+)
+async def create_followup_draft(
+    question_id: uuid.UUID, body: InternalFollowupDraftCreate, session: DB
+) -> InternalVersionContent:
+    # A proctor's mid-exam follow-up (Phase 2 Slice 6) — no ADMIN/AUTHOR
+    # token to forward (the examiner-facing PATCH /questions/{id} is
+    # role-gated to those two), so exam calls this instead. Reuses
+    # update_question verbatim — forks via ensure_mutable_version if the
+    # question is currently published, mutates the existing draft in place
+    # otherwise. Deliberately does NOT publish: test cases still need to be
+    # attached to this draft first (attaching after publish would trigger a
+    # second, unwanted fork — see docs/design-live-proctoring.md).
+    _question, version, _topic_ids = await questions_service.update_question(
+        session,
+        org_id=body.org_id,
+        question_id=question_id,
+        version_fields={"constraints_md": body.constraints_md},
+        topic_ids=None,
+    )
+    return InternalVersionContent(
+        version_id=version.id,
+        question_id=version.question_id,
+        version_number=version.version_number,
+        title=version.title,
+        statement_md=version.statement_md,
+        constraints_md=version.constraints_md,
+        difficulty=version.difficulty,
+        time_limit_ms=version.time_limit_ms,
+        memory_limit_mb=version.memory_limit_mb,
+        starter_code=version.starter_code,
+    )
+
+
+class InternalPublish(BaseModel):
+    org_id: uuid.UUID
+
+
+class InternalPublished(BaseModel):
+    question_id: uuid.UUID
+    published_version_id: uuid.UUID
+
+
+@router.post("/questions/{question_id}/publish", response_model=InternalPublished)
+async def publish_question(
+    question_id: uuid.UUID, body: InternalPublish, session: DB
+) -> InternalPublished:
+    # Thin internal mirror of the examiner-facing POST /questions/{id}/publish
+    # — same service call, reachable without a bearer token. Seals a
+    # follow-up's draft version as immutable once its test cases are attached.
+    question, _version, _topic_ids = await questions_service.publish_question(
+        session, org_id=body.org_id, question_id=question_id
+    )
+    assert question.published_version_id is not None
+    return InternalPublished(
+        question_id=question.id, published_version_id=question.published_version_id
+    )

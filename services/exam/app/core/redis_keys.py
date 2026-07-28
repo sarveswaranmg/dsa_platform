@@ -14,3 +14,9 @@ def session_key(session_id: uuid.UUID) -> str:
 
 def invite_key(jti: str) -> str:
     return f"ex:invite:{jti}"
+
+
+def session_events_channel(session_id: uuid.UUID) -> str:
+    """Pub/sub channel a session's live WebSocket connections (candidate,
+    proctor) subscribe to — see app/services/session_events.py::emit."""
+    return f"ex:session-events:{session_id}"

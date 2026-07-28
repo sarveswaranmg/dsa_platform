@@ -28,6 +28,7 @@ from app.repositories import blueprints as blueprints_repo
 from app.repositories import exam_slot_questions as exam_slot_questions_repo
 from app.repositories import exams as exams_repo
 from app.repositories import sessions as sessions_repo
+from app.services import session_events
 from app.services import submissions as submissions_service
 from app.services.sampling import choose
 
@@ -119,9 +120,20 @@ async def start_session(
             )
         await session.commit()
         await _mirror_to_redis(redis, exam_session)
+        for slot in pinned_slots:
+            await session_events.emit(
+                session,
+                redis,
+                org_id=org_id,
+                session_id=exam_session.id,
+                type="question_assigned",
+                payload={"ordinal": slot.ordinal, "question_id": str(slot.question_id)},
+                question_version_id=slot.question_version_id,
+            )
         return exam_session
 
     ordinal = 1
+    assigned: list[tuple[int, uuid.UUID, uuid.UUID]] = []
     for index, entry in enumerate(version.topic_mix):
         topic_id = uuid.UUID(str(entry["topic_id"]))
         d_min, d_max = int(entry["difficulty_min"]), int(entry["difficulty_max"])
@@ -143,6 +155,7 @@ async def start_session(
             count=count,
         )
         for ref in chosen:
+            assigned.append((ordinal, ref.question_id, ref.published_version_id))
             await sessions_repo.add_question(
                 session,
                 org_id=org_id,
@@ -155,6 +168,16 @@ async def start_session(
 
     await session.commit()
     await _mirror_to_redis(redis, exam_session)
+    for assigned_ordinal, question_id, question_version_id in assigned:
+        await session_events.emit(
+            session,
+            redis,
+            org_id=org_id,
+            session_id=exam_session.id,
+            type="question_assigned",
+            payload={"ordinal": assigned_ordinal, "question_id": str(question_id)},
+            question_version_id=question_version_id,
+        )
     return exam_session
 
 
@@ -232,6 +255,7 @@ async def submit(
         session,
         client,
         publisher,
+        redis,
         org_id=org_id,
         exam_id=exam_id,
         question_version_id=assigned.question_version_id,
