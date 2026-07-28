@@ -4,6 +4,7 @@ from app.models.blueprint_version import BlueprintVersion
 from app.models.case_verdict import CaseVerdict
 from app.models.exam import Exam, ExamStatus
 from app.models.exam_session import ExamSession, SessionStatus
+from app.models.exam_slot_question import ExamSlotQuestion, SlotStatus
 from app.models.examiner import Examiner, Role
 from app.models.invite import Invite, InviteStatus
 from app.models.org import Org
@@ -17,6 +18,7 @@ __all__ = [
     "CaseVerdict",
     "Exam",
     "ExamSession",
+    "ExamSlotQuestion",
     "ExamStatus",
     "Examiner",
     "Invite",
@@ -26,6 +28,7 @@ __all__ = [
     "Role",
     "SessionQuestion",
     "SessionStatus",
+    "SlotStatus",
     "Submission",
     "SubmissionStatus",
 ]

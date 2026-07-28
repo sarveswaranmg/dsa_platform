@@ -1,3 +1,4 @@
+import uuid
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -52,3 +53,38 @@ class GeneratedTestCase(BaseModel):
     input: str
     description: str
     case_type: Literal["edge", "adversarial", "stress"]
+
+
+class AvailableTopic(BaseModel):
+    """One topic the requesting org has defined, passed in by `exam` (which
+    already holds an examiner token to ask question service for the org's
+    topic list — `ai` has no other way to know valid topic ids for that org)."""
+
+    id: uuid.UUID
+    name: str
+
+
+class BlueprintSlot(BaseModel):
+    """One topic slot in an LLM-proposed exam blueprint (Phase 2 Slice 4).
+    The LLM only picks a difficulty band per slot — `difficulty_min`/`_max`
+    are filled in server-side from `DIFFICULTY_BANDS`, never chosen directly,
+    keeping this consistent with how question generation already reasons
+    about difficulty."""
+
+    topic_id: uuid.UUID
+    weight: int = Field(ge=1, le=100)
+    difficulty_band: Literal["easy", "medium", "hard"]
+    difficulty_min: int = Field(ge=1, le=5)
+    difficulty_max: int = Field(ge=1, le=5)
+    question_count: int = Field(ge=1)
+
+
+class BlueprintSpec(BaseModel):
+    """The LLM's structured proposal for a Mode 2 exam's blueprint. `exam`
+    converts `topic_mix` into its own `TopicMixEntry` shape unchanged —
+    weights must sum to 100 and topic_ids must be unique, same constraints
+    `exam`'s blueprint schema already enforces."""
+
+    topic_mix: list[BlueprintSlot]
+    total_duration_minutes: int = Field(ge=1, le=1440)
+    rationale: str

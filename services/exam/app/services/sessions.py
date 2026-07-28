@@ -25,6 +25,7 @@ from app.models.exam_session import ExamSession, SessionStatus
 from app.models.session_question import SessionQuestion
 from app.models.submission import Submission
 from app.repositories import blueprints as blueprints_repo
+from app.repositories import exam_slot_questions as exam_slot_questions_repo
 from app.repositories import exams as exams_repo
 from app.repositories import sessions as sessions_repo
 from app.services import submissions as submissions_service
@@ -97,6 +98,28 @@ async def start_session(
         started_at=now,
         deadline_at=deadline,
     )
+
+    # Mode 2 (profile-driven, Phase 2 Slice 4) exams already have their
+    # questions pinned per slot — write session_questions straight from
+    # those instead of sampling a fresh pool. Phase 1 (manual) exams have no
+    # ExamSlotQuestion rows, so this is a strictly additive branch.
+    pinned_slots = await exam_slot_questions_repo.list_by_exam(
+        session, org_id=org_id, exam_id=exam_id
+    )
+    if pinned_slots:
+        for slot in pinned_slots:
+            assert slot.question_id is not None and slot.question_version_id is not None
+            await sessions_repo.add_question(
+                session,
+                org_id=org_id,
+                session_id=exam_session.id,
+                ordinal=slot.ordinal,
+                question_id=slot.question_id,
+                question_version_id=slot.question_version_id,
+            )
+        await session.commit()
+        await _mirror_to_redis(redis, exam_session)
+        return exam_session
 
     ordinal = 1
     for index, entry in enumerate(version.topic_mix):

@@ -22,6 +22,59 @@ def invite_link(token: str) -> str:
     return f"{get_settings().frontend_base_url}/exam/invite?token={token}"
 
 
+async def send_invite(
+    session: AsyncSession,
+    redis: Redis,
+    email_sender: EmailSender,
+    *,
+    org_id: uuid.UUID,
+    exam: Exam,
+) -> tuple[Invite, str]:
+    """Issue the candidate's single-use invite (Redis key + JWT) and send the
+    email. Shared by the Phase 1 synchronous schedule path and Mode 2's
+    deferred confirm path (Phase 2 Slice 4) — Mode 2 exams reach this only
+    once the examiner confirms (or the review deadline auto-confirms), not
+    at schedule-ai time."""
+    now = datetime.now(UTC)
+    jti = secrets.token_urlsafe(32)
+    invite = await invites_repo.create_invite(
+        session, org_id=org_id, exam_id=exam.id, jti=jti, candidate_email=exam.candidate_email
+    )
+
+    token = create_invite_token(
+        jti=jti,
+        invite_id=invite.id,
+        exam_id=exam.id,
+        org_id=org_id,
+        candidate_email=exam.candidate_email,
+        not_before=now,
+        expires_at=exam.ends_at,
+    )
+    # Redis is the single-use authority; TTL retires the key when the window ends.
+    ttl = max(1, int((exam.ends_at - now).total_seconds()))
+    await redis.set(
+        invite_key(jti),
+        json.dumps({"invite_id": str(invite.id), "exam_id": str(exam.id)}),
+        ex=ttl,
+    )
+    await session.commit()
+
+    link = invite_link(token)
+    await email_sender.send(
+        EmailMessage(
+            to=exam.candidate_email,
+            subject="Your DSA exam invitation",
+            body=(
+                "You have been invited to a DSA assessment. Open this "
+                f"single-use link to begin:\n\n{link}\n\n"
+                f"The exam window is {exam.starts_at.isoformat()} to "
+                f"{exam.ends_at.isoformat()}."
+            ),
+        )
+    )
+    return invite, link
+
+
 async def schedule_exam(
     session: AsyncSession,
     redis: Redis,
@@ -53,41 +106,7 @@ async def schedule_exam(
         starts_at=starts_at,
         ends_at=ends_at,
     )
-    jti = secrets.token_urlsafe(32)
-    invite = await invites_repo.create_invite(
-        session, org_id=org_id, exam_id=exam.id, jti=jti, candidate_email=email
-    )
-
-    token = create_invite_token(
-        jti=jti,
-        invite_id=invite.id,
-        exam_id=exam.id,
-        org_id=org_id,
-        candidate_email=email,
-        not_before=now,
-        expires_at=ends_at,
-    )
-    # Redis is the single-use authority; TTL retires the key when the window ends.
-    ttl = max(1, int((ends_at - now).total_seconds()))
-    await redis.set(
-        invite_key(jti),
-        json.dumps({"invite_id": str(invite.id), "exam_id": str(exam.id)}),
-        ex=ttl,
-    )
-    await session.commit()
-
-    link = invite_link(token)
-    await email_sender.send(
-        EmailMessage(
-            to=email,
-            subject="Your DSA exam invitation",
-            body=(
-                "You have been invited to a DSA assessment. Open this "
-                f"single-use link to begin:\n\n{link}\n\n"
-                f"The exam window is {starts_at.isoformat()} to {ends_at.isoformat()}."
-            ),
-        )
-    )
+    invite, link = await send_invite(session, redis, email_sender, org_id=org_id, exam=exam)
     return exam, invite, link
 
 

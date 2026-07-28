@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from app.api.routes import generation, health, profiles, testcase_generation
+from app.api.routes import blueprints, generation, health, profiles, testcase_generation
 from app.core import s3
 from app.core.config import get_settings, validate_production_config
 from app.core.exceptions import DomainError
@@ -49,6 +49,7 @@ def create_app() -> FastAPI:
     app.include_router(profiles.router)
     app.include_router(generation.router)
     app.include_router(testcase_generation.router)
+    app.include_router(blueprints.router)
     return app
 
 

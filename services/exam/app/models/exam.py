@@ -3,6 +3,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, Enum, ForeignKey, String
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
@@ -14,6 +15,15 @@ class ExamStatus(enum.StrEnum):
     SUBMITTED = "submitted"
     EXPIRED = "expired"
     CANCELLED = "cancelled"
+    # Mode 2 (profile-driven, Phase 2 Slice 4) only — Mode 1 exams go
+    # straight to SCHEDULED. PENDING_GENERATION: AI question generation is
+    # in flight for one or more slots. PENDING_REVIEW: all slots ready,
+    # waiting on examiner confirm (or the review deadline) before the
+    # invite goes out. GENERATION_FAILED: at least one slot failed; an
+    # examiner override moves it back to PENDING_GENERATION.
+    PENDING_GENERATION = "pending_generation"
+    PENDING_REVIEW = "pending_review"
+    GENERATION_FAILED = "generation_failed"
 
 
 class Exam(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -36,3 +46,10 @@ class Exam(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ),
         default=ExamStatus.SCHEDULED,
     )
+    # Mode 2 only: set once every slot reaches `ready`; a lazy check on the
+    # next read (GET/confirm/regenerate) auto-confirms once this passes.
+    review_deadline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Mode 2 only: the language targets requested at schedule-ai time, kept
+    # here (once per exam, shared by every slot) so a later slot
+    # regeneration can re-call ai's generate_question with the same targets.
+    language_targets: Mapped[list[str] | None] = mapped_column(ARRAY(String))

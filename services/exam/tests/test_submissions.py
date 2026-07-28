@@ -7,6 +7,7 @@ from app.clients.question_service import (
     PublishedQuestionRef,
     QuestionRef,
     TestCaseKeys,
+    TopicRef,
     VersionContent,
 )
 from app.messaging.contracts import (
@@ -29,6 +30,9 @@ class FakeQuestionClient:
 
     async def list_published_questions(self, **kwargs: object) -> list[QuestionRef]:
         return []
+
+    async def list_topics(self, *, authorization: str) -> list[TopicRef]:
+        raise NotImplementedError
 
     async def list_version_test_cases(
         self, *, org_id: uuid.UUID, version_id: uuid.UUID

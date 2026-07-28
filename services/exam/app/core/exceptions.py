@@ -88,3 +88,8 @@ class SessionLocked(DomainError):
 class UpstreamServiceError(DomainError):
     status_code = 502
     detail = "Question service is unavailable"
+
+
+class InvalidExamStatus(DomainError):
+    status_code = 409
+    detail = "Exam is not in a state that allows this action"

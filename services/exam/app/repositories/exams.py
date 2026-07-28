@@ -17,6 +17,7 @@ async def create_exam(
     candidate_email: str,
     starts_at: datetime,
     ends_at: datetime,
+    status: ExamStatus = ExamStatus.SCHEDULED,
 ) -> Exam:
     exam = Exam(
         org_id=org_id,
@@ -25,7 +26,7 @@ async def create_exam(
         candidate_email=candidate_email,
         starts_at=starts_at,
         ends_at=ends_at,
-        status=ExamStatus.SCHEDULED,
+        status=status,
     )
     session.add(exam)
     await session.flush()

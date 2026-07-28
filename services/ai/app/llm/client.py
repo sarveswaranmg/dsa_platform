@@ -9,11 +9,15 @@ from app.clients.github import GitHubSignals
 from app.core.config import get_settings
 from app.generation.schemas import (
     DIFFICULTY_BANDS,
+    AvailableTopic,
+    BlueprintSlot,
+    BlueprintSpec,
     GeneratedExample,
     GeneratedQuestionDraft,
     GeneratedTestCase,
     InputVar,
 )
+from app.models.candidate_profile import CandidateProfile
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +55,15 @@ class LLMClient(Protocol):
         adversarial_count: int,
         stress_count: int,
     ) -> list[GeneratedTestCase]: ...
+
+    async def propose_blueprint(
+        self,
+        profile: CandidateProfile,
+        *,
+        target_role: str,
+        seniority_band: str,
+        available_topics: list[AvailableTopic],
+    ) -> BlueprintSpec: ...
 
 
 class MockLLMClient:
@@ -123,6 +136,48 @@ class MockLLMClient:
                     )
                 )
         return cases
+
+    async def propose_blueprint(
+        self,
+        profile: CandidateProfile,
+        *,
+        target_role: str,
+        seniority_band: str,
+        available_topics: list[AvailableTopic],
+    ) -> BlueprintSpec:
+        # Small fixed spec over whatever topics were actually passed in, so
+        # the whole flow is testable with no real key — same philosophy as
+        # every other mock in this service. Weights are split evenly across
+        # up to 2 topics, with any remainder folded into the last slot so
+        # they always sum to exactly 100 (exam's blueprint schema requires
+        # this, and requires unique topic_ids — picking distinct topics
+        # from `available_topics` satisfies that for free).
+        chosen = available_topics[:2]
+        band: Literal["easy", "medium", "hard"] = "medium"
+        lo, hi = DIFFICULTY_BANDS[band]
+        base_weight = 100 // len(chosen)
+        last_weight = 100 - base_weight * (len(chosen) - 1)
+        slots = []
+        for index, topic in enumerate(chosen):
+            weight = base_weight if index < len(chosen) - 1 else last_weight
+            slots.append(
+                BlueprintSlot(
+                    topic_id=topic.id,
+                    weight=weight,
+                    difficulty_band=band,
+                    difficulty_min=lo,
+                    difficulty_max=hi,
+                    question_count=2,
+                )
+            )
+        return BlueprintSpec(
+            topic_mix=slots,
+            total_duration_minutes=90,
+            rationale=(
+                f"Mock proposal for a {seniority_band} {target_role} candidate "
+                f"(years_exp={profile.years_exp})."
+            ),
+        )
 
 
 class AnthropicLLMClient:
@@ -264,6 +319,35 @@ class AnthropicLLMClient:
         )
         text = await self._call(prompt, model=self._DRAFT_MODEL)
         return TypeAdapter(list[GeneratedTestCase]).validate_json(text)
+
+    async def propose_blueprint(
+        self,
+        profile: CandidateProfile,
+        *,
+        target_role: str,
+        seniority_band: str,
+        available_topics: list[AvailableTopic],
+    ) -> BlueprintSpec:
+        topics_desc = ", ".join(f"{t.id} ({t.name})" for t in available_topics)
+        prompt = (
+            f"Propose an exam blueprint for a {seniority_band} {target_role} "
+            f"candidate. Candidate signals: years_exp={profile.years_exp}, "
+            f"domains={profile.domains}, tech_stack={profile.tech_stack}, "
+            f"seniority_estimate={profile.seniority_estimate}, "
+            f"strong_signals={profile.strong_signals}, "
+            f"weak_signals={profile.weak_signals}.\n\n"
+            f"Available topics (id, name): {topics_desc}\n\n"
+            "Respond with strict JSON matching: topic_mix (list of "
+            "{topic_id: one of the available topic ids above, weight: int, "
+            "difficulty_band: \"easy\"|\"medium\"|\"hard\", difficulty_min: int "
+            "1-5, difficulty_max: int 1-5, question_count: int}), "
+            "total_duration_minutes (int), rationale (string). "
+            "topic_mix weights must sum to exactly 100 and must not repeat a "
+            "topic_id. difficulty_min/difficulty_max must match the band: "
+            "easy=1-2, medium=2-3, hard=4-5."
+        )
+        text = await self._call(prompt, model=self._DRAFT_MODEL)
+        return BlueprintSpec.model_validate_json(text)
 
 
 def get_llm_client() -> LLMClient:

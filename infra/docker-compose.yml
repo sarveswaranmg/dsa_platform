@@ -142,6 +142,7 @@ services:
       # key only (below).
       RS256_PRIVATE_KEY: *rs256-private-key
       QUESTION_SERVICE_URL: http://question:8000
+      AI_SERVICE_URL: http://ai:8000
       # Google Cloud Console → APIs & Services → Credentials → OAuth 2.0
       # Client IDs (console.cloud.google.com/apis/credentials). Placeholders
       # below are dev-only; ENV=production requires all three to be real and

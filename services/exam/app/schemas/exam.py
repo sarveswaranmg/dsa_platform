@@ -21,6 +21,34 @@ class ExamScheduleRequest(BaseModel):
         return self
 
 
+class ExamScheduleAiRequest(BaseModel):
+    candidate_email: EmailStr
+    candidate_profile_id: uuid.UUID
+    target_role: str
+    seniority_band: str
+    language_targets: list[str]
+    starts_at: datetime
+    ends_at: datetime
+
+    @model_validator(mode="after")
+    def _check_window(self) -> Self:
+        if self.ends_at <= self.starts_at:
+            raise ValueError("ends_at must be after starts_at")
+        return self
+
+
+class SlotResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    ordinal: int
+    topic_id: uuid.UUID
+    difficulty_band: str
+    question_id: uuid.UUID | None
+    question_version_id: uuid.UUID | None
+    status: str
+    error: str | None
+
+
 class InviteSummary(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -41,6 +69,9 @@ class ExamResponse(BaseModel):
     starts_at: datetime
     ends_at: datetime
     status: ExamStatus
+    # Mode 2 only: null for Phase 1 (manually-authored) exams.
+    review_deadline_at: datetime | None = None
+    slots: list[SlotResponse] = []
 
 
 class ExamScheduleResponse(ExamResponse):
@@ -48,3 +79,8 @@ class ExamScheduleResponse(ExamResponse):
     # Present in dev only (email_backend=console) so the flow is walkable
     # without a real inbox.
     invite_link: str | None = None
+
+
+class ScheduleAiCreated(BaseModel):
+    id: uuid.UUID
+    status: ExamStatus

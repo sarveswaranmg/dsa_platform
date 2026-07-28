@@ -3,6 +3,65 @@
 Short, dated records of significant technical decisions and the reasoning
 behind them. Newest first.
 
+## Mode 2 scheduling: reuse Slice 2's endpoints via token-forwarding instead of new ai aggregate endpoints (2026-07-28)
+
+**Decision:** Phase 2 Slice 4's `POST /exams/schedule-ai` does not call any
+new `ai`-side aggregate endpoints for the per-slot generation fan-out/status
+poll that the Phase 2 prompt doc's shorthand (`POST /exams/generate` + `GET
+/exams/generate/{id}`) implied. Building those would mean a parallel
+aggregate-tracking table in `ai` (`exam_generation_jobs`/
+`exam_generation_slots`) duplicating tracking `services/exam` needs to keep
+anyway (it has to remember which question ended up in which slot). Instead,
+`exam` fans out by calling Slice 2's existing, already-tested `POST
+/questions/generate` once per slot directly, and aggregates status itself
+by polling each slot's job via Slice 2's existing `GET
+/questions/generate/{id}` — both new methods on a new
+`app/clients/ai_service.py` (mirrors `question_service.py`'s
+`Protocol`/`Http.../get_*_client()` shape exactly). The only new `ai`-side
+work this slice needed was a synchronous `POST /blueprints/generate` (one
+LLM call, nothing stored — `ai` doesn't own blueprints).
+
+Every cross-service call forwards the acting examiner's bearer token
+(`request.headers["authorization"]`, the same pattern
+`app/api/routes/blueprints.py`'s `sample_blueprint` already used for
+`question_service.py`) rather than minting a fresh token — every entry
+point (`schedule-ai`, a later `GET`, confirm, or a slot override) runs
+inside some live, freshly-authenticated request, so a valid token to
+forward is always available. No new internal/token-minting machinery
+needed for the examiner plane.
+
+**Two scope decisions confirmed with the user:** overriding a slot
+regenerates it via a fresh Slice 2 generation job (not a pick from the
+existing question bank), and auto-confirm is a **lazy check on read**, not
+a background timer — `refresh_ai_exam` runs first on every Mode 2 endpoint
+(`GET /exams/{id}`, confirm, regenerate) and auto-confirms right there once
+`review_deadline_at` has passed. This avoids a new persistent background-
+task type and stays fully deterministic to test (the deadline is a stored
+timestamp, movable directly in a test without monkeypatching the clock).
+
+**Schema notes:** `Exam.status` is a native Postgres enum
+(`sqlalchemy.Enum` with `values_callable`) — the only column in this
+codebase using one — so adding `pending_generation`/`pending_review`/
+`generation_failed` required a hand-written migration
+(`op.execute("ALTER TYPE exam_status ADD VALUE IF NOT EXISTS ...")`); no
+prior migration in this repo had done this before. Postgres 16 allows this
+inside a normal transactional migration (the pre-12 "not in a transaction
+block" restriction no longer applies), confirmed by applying it directly
+against the dev stack. Downgrade leaves the added values in place —
+Postgres has no `DROP VALUE`, only a full type rebuild, which isn't worth
+it for a migration nobody has shipped yet. The new `ExamSlotQuestion` table
+uses a plain `String` status column instead, matching this codebase's
+default convention (`SessionStatus`, `GenerationStatus`, etc.) — native
+enums are the exception here, not the rule.
+
+**Status:** Implemented and verified end-to-end through the real stack
+(gateway → exam → ai → question, with judge-gen actually generating and
+differentially validating all 4 slots of a 2-topic, question_count=2 mock
+blueprint) — schedule-ai → pending_generation → pending_review → confirm →
+scheduled, plus the pinned-slot bypass in `start_session` confirmed via the
+exam test suite (a Mode 2 exam's `session_questions` come straight from
+`ExamSlotQuestion` rows, never `sampling.choose()`).
+
 ## Test-case factory: AI-generated questions only, reuses Slice 2's judge-gen lane as-is (2026-07-28)
 
 **Decision:** Phase 2 Slice 3's test-case factory (`POST

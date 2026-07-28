@@ -32,6 +32,12 @@ class PublishedQuestionRef:
 
 
 @dataclass(frozen=True)
+class TopicRef:
+    id: uuid.UUID
+    name: str
+
+
+@dataclass(frozen=True)
 class VersionContent:
     version_id: uuid.UUID
     question_id: uuid.UUID
@@ -53,6 +59,8 @@ class QuestionServiceClient(Protocol):
     async def list_published_questions(
         self, *, authorization: str, topic_id: uuid.UUID, difficulty: int
     ) -> list[QuestionRef]: ...
+
+    async def list_topics(self, *, authorization: str) -> list[TopicRef]: ...
 
     async def list_version_test_cases(
         self, *, org_id: uuid.UUID, version_id: uuid.UUID
@@ -92,6 +100,21 @@ class HttpQuestionServiceClient:
             )
         return [
             QuestionRef(id=uuid.UUID(item["id"]), difficulty=item["difficulty"])
+            for item in response.json()
+        ]
+
+    async def list_topics(self, *, authorization: str) -> list[TopicRef]:
+        try:
+            async with httpx.AsyncClient(base_url=self._base_url, timeout=10.0) as client:
+                response = await client.get(
+                    "/topics", headers={"Authorization": authorization}
+                )
+        except httpx.HTTPError as exc:
+            raise UpstreamServiceError() from exc
+        if response.status_code != 200:
+            raise UpstreamServiceError(f"Question service returned {response.status_code}")
+        return [
+            TopicRef(id=uuid.UUID(item["id"]), name=item["name"])
             for item in response.json()
         ]
 

@@ -17,10 +17,12 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engin
 from sqlalchemy.pool import NullPool
 
 from alembic import command
+from app.clients.ai_service import BlueprintSpec, GenerationStatus, get_ai_client
 from app.clients.question_service import (
     PublishedQuestionRef,
     QuestionRef,
     TestCaseKeys,
+    TopicRef,
     VersionContent,
     get_question_client,
 )
@@ -145,6 +147,7 @@ class FakeQuestionClient:
         self.versions: dict[uuid.UUID, VersionContent] = {}
         self.test_case_keys: dict[uuid.UUID, list[TestCaseKeys]] = {}
         self.seen_authorizations: list[str] = []
+        self.topics: list[TopicRef] = []
 
     def set_pool(self, topic_id: uuid.UUID, refs: list[QuestionRef]) -> None:
         self.pools[topic_id] = refs
@@ -182,6 +185,10 @@ class FakeQuestionClient:
         self.seen_authorizations.append(authorization)
         return [r for r in self.pools.get(topic_id, []) if r.difficulty == difficulty]
 
+    async def list_topics(self, *, authorization: str) -> list[TopicRef]:
+        self.seen_authorizations.append(authorization)
+        return self.topics
+
     async def list_published_questions_internal(
         self, *, org_id: uuid.UUID, topic_id: uuid.UUID, difficulty: int
     ) -> list[PublishedQuestionRef]:
@@ -208,6 +215,72 @@ class FakeQuestionClient:
 @pytest.fixture
 def fake_question_client() -> FakeQuestionClient:
     return FakeQuestionClient()
+
+
+class FakeAiServiceClient:
+    """Stand-in for the ai service (Phase 2 Slice 4). Tests seed
+    `blueprint_spec` for `propose_blueprint`, then drive each generated
+    job's outcome directly via `set_job_status` (job ids are handed back
+    from `generate_question`, in call order, one per slot)."""
+
+    def __init__(self) -> None:
+        self.blueprint_spec: BlueprintSpec | None = None
+        self.jobs: dict[uuid.UUID, GenerationStatus] = {}
+        self.generate_calls: list[dict[str, object]] = []
+        self.seen_authorizations: list[str] = []
+
+    def set_blueprint_spec(self, spec: BlueprintSpec) -> None:
+        self.blueprint_spec = spec
+
+    def set_job_status(self, job_id: uuid.UUID, status: GenerationStatus) -> None:
+        self.jobs[job_id] = status
+
+    async def propose_blueprint(
+        self,
+        *,
+        authorization: str,
+        candidate_profile_id: uuid.UUID,
+        target_role: str,
+        seniority_band: str,
+        available_topics: list[TopicRef],
+    ) -> BlueprintSpec:
+        self.seen_authorizations.append(authorization)
+        assert self.blueprint_spec is not None, "test must call set_blueprint_spec first"
+        return self.blueprint_spec
+
+    async def generate_question(
+        self,
+        *,
+        authorization: str,
+        topic_id: uuid.UUID,
+        difficulty_band: str,
+        language_targets: list[str],
+    ) -> uuid.UUID:
+        self.seen_authorizations.append(authorization)
+        job_id = uuid.uuid4()
+        self.generate_calls.append(
+            {
+                "job_id": job_id,
+                "topic_id": topic_id,
+                "difficulty_band": difficulty_band,
+                "language_targets": language_targets,
+            }
+        )
+        self.jobs[job_id] = GenerationStatus(
+            status="queued", question_id=None, question_version_id=None, error=None
+        )
+        return job_id
+
+    async def get_generation_status(
+        self, *, authorization: str, job_id: uuid.UUID
+    ) -> GenerationStatus:
+        self.seen_authorizations.append(authorization)
+        return self.jobs[job_id]
+
+
+@pytest.fixture
+def fake_ai_client() -> FakeAiServiceClient:
+    return FakeAiServiceClient()
 
 
 class FakeEmailSender:
@@ -273,6 +346,7 @@ async def redis_client() -> AsyncIterator[Redis]:
 async def client(
     db_session: AsyncSession,
     fake_question_client: FakeQuestionClient,
+    fake_ai_client: FakeAiServiceClient,
     fake_email_sender: FakeEmailSender,
     fake_oidc_verifier: FakeGoogleVerifier,
     redis_client: Redis,
@@ -284,6 +358,7 @@ async def client(
 
     app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[get_question_client] = lambda: fake_question_client
+    app.dependency_overrides[get_ai_client] = lambda: fake_ai_client
     app.dependency_overrides[get_redis] = lambda: redis_client
     app.dependency_overrides[get_email_sender] = lambda: fake_email_sender
     app.dependency_overrides[get_oidc_verifier] = lambda: fake_oidc_verifier

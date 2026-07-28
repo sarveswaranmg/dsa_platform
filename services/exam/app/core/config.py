@@ -21,6 +21,15 @@ class Settings(BaseSettings):
     # compose-mapped port; inside the compose network it is http://question:8000.
     question_service_url: str = "http://localhost:8002"
 
+    # AI service (HTTP only — no code imports). Host default reaches the
+    # compose-mapped port; inside the compose network it is http://ai:8000.
+    # Used by Mode 2 (profile-driven) exam scheduling, Phase 2 Slice 4.
+    ai_service_url: str = "http://localhost:8003"
+    # How long an examiner has to review/override a Mode 2 exam's
+    # AI-generated slots before it auto-confirms on the next read (lazy
+    # check, not a background timer — see docs/design-mode2-scheduling.md).
+    ai_exam_review_timeout_seconds: int = 600
+
     # Judge pipeline (SQS via localstack). The exam service publishes
     # submission jobs and consumes verdicts (no code imports — queue only).
     sqs_endpoint_url: str = "http://localhost:4566"
