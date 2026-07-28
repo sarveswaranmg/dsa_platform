@@ -238,6 +238,8 @@ services:
       # DiffResults, same localstack queue broker as judge-live.
       SQS_ENDPOINT_URL: http://localstack:4566
       QUESTION_SERVICE_URL: http://question:8000
+      # Adaptive difficulty engine (Phase 2 Slice 5) — per-session state.
+      REDIS_URL: redis://redis:6379/0
       # Mock by default — no Anthropic key or GitHub token required in dev.
       LLM_BACKEND: ${LLM_BACKEND:-mock}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
@@ -255,6 +257,8 @@ services:
       postgres:
         condition: service_healthy
       localstack:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   # Judge worker: consumes submission jobs and launches sibling runner

@@ -3,6 +3,68 @@
 Short, dated records of significant technical decisions and the reasoning
 behind them. Newest first.
 
+## Adaptive difficulty: engine only, no live question re-selection yet (2026-07-28)
+
+**Decision:** Phase 2 Slice 5's difficulty engine (`ai`'s new `POST
+/internal/difficulty/signal`, Redis-backed per-session state, static
+rule engine) is built and fully wired — `exam`'s verdict consumer calls
+it after every graded (`mode=submit`) verdict and records the returned
+band on `ExamSession.current_difficulty`/`current_difficulty_band` — but
+nothing yet uses that band to change what question a candidate sees.
+Confirmed explicitly with the user: today every session's questions are
+still assigned upfront at `start_session` (Mode 1 sampling or Mode 2's
+Slice-4 pinned slots), and there's no "fetch the next question" mechanic
+for either mode. Mode 2's own model — the examiner reviews AI-generated
+questions **before** the invite goes out — is fundamentally at odds with
+picking a question live mid-session anyway, so real adaptive
+re-selection is deferred to a later slice once there's a coherent answer
+for that interaction.
+
+**Rule engine** collapses the design note's four bullets into two
+mutually-exclusive branches on `verdict == "AC"` (`services/ai/app/difficulty/rules.py`):
+an accepted, fast (`<30%` of the question's time budget) solution raises
+difficulty (`+1` if `complexity_hint == "optimal"`, `+0.5` otherwise —
+including `None`); anything else holds, except a failed attempt at
+`>=80%` of the time budget, which lowers by `1`. `complexity_hint` is
+accepted as an optional input and both branches are unit-tested via an
+explicit hint, but `exam`'s real call always passes `None` — no
+complexity-detection signal exists anywhere yet (Slice 7's AI evaluation
+is the eventual source), so production behavior always takes the
+conservative `+0.5` path today.
+
+**New per-question timing**: `SessionQuestion.shown_at` (nullable,
+additive migration) is set lazily the first time `GET
+/session/questions/{ordinal}` is called for that row — no such signal
+existed before this slice. `time_elapsed_pct` is computed as elapsed time
+since `shown_at` divided by the session's total duration split evenly
+across its question count (`(deadline_at - started_at) / num_questions`)
+— no separate blueprint lookup needed.
+
+**`send_difficulty_signal` is unauthenticated** (`/internal/difficulty/signal`),
+unlike every other method on `exam`'s `ai_service.py` client (which
+forward the calling examiner's bearer token) — because this call
+originates from `exam`'s detached verdict-consumer background loop,
+which has no live token to forward, the same reason Slice 2 needed
+`POST /internal/questions` instead of token-forwarding. Already blocked
+at the gateway edge by the existing `Route("/internal", None,
+Policy.BLOCKED)`.
+
+**`services/ai` gained a net-new Redis dependency** (previously
+Postgres/S3/SQS only) — mirrors `services/exam`'s `core/redis.py`/
+`redis_keys.py` shape exactly, `ai:` key prefix instead of `ex:`. State
+is a single float per session with a 24h TTL — ephemeral, never meant to
+outlive an exam window, no Postgres row.
+
+**Status:** Implemented and verified end-to-end through the real stack
+(gateway → exam → ai → Redis → exam): a real judge-graded AC submission
+correctly raised `ExamSession.current_difficulty` from the 3.0 default to
+3.5 (`+0.5`, fast AC with no complexity hint) and stored `"hard"` as the
+band (cutoffs `<=2.0` easy / `<=3.0` medium / else hard — a new,
+standalone partition, not a reuse of `generation/schemas.py`'s
+`DIFFICULTY_BANDS`, which is only ever a per-band validation range and
+isn't a clean partition itself), with Redis's `ai:diff:{session_id}`
+matching exactly.
+
 ## Mode 2 scheduling: reuse Slice 2's endpoints via token-forwarding instead of new ai aggregate endpoints (2026-07-28)
 
 **Decision:** Phase 2 Slice 4's `POST /exams/schedule-ai` does not call any

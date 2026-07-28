@@ -51,6 +51,10 @@ class Settings(BaseSettings):
     # internal endpoint needs no bearer token (see app/clients/question_service.py).
     question_service_url: str = "http://localhost:8002"
 
+    # Adaptive difficulty engine (Phase 2 Slice 5) — per-session difficulty
+    # state lives here, keyed by session_id (app/core/redis_keys.py).
+    redis_url: str = "redis://localhost:6379/0"
+
     # Real inputs (100) would make the test suite extremely slow — tests
     # override this to something small.
     generation_input_count: int = 100

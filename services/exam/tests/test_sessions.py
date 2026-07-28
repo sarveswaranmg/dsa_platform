@@ -225,6 +225,35 @@ async def test_fetch_question_content(
     assert missing.status_code == 404
 
 
+async def test_fetch_question_content_sets_shown_at_only_once(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fake_question_client: FakeQuestionClient,
+    org_id: uuid.UUID,
+) -> None:
+    exam = await _setup_exam(db_session, fake_question_client, org_id)
+    headers = _headers(exam)
+    started = (await client.post("/candidate/session/start", headers=headers)).json()
+
+    await client.get("/candidate/session/questions/1", headers=headers)
+    first = await sessions_repo.get_question(
+        db_session, org_id=org_id, session_id=uuid.UUID(started["id"]), ordinal=1
+    )
+    assert first is not None and first.shown_at is not None
+
+    # Backdate it so a second fetch overwriting it would be detectable.
+    backdated = first.shown_at - timedelta(hours=1)
+    first.shown_at = backdated
+    await db_session.commit()
+
+    await client.get("/candidate/session/questions/1", headers=headers)
+    second = await sessions_repo.get_question(
+        db_session, org_id=org_id, session_id=uuid.UUID(started["id"]), ordinal=1
+    )
+    assert second is not None
+    assert second.shown_at == backdated  # unchanged — set only once
+
+
 async def test_submit_records_session_and_version(
     client: AsyncClient,
     db_session: AsyncSession,

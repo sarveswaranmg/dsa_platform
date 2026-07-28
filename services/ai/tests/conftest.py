@@ -27,11 +27,14 @@ from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
 from cryptography.hazmat.primitives.serialization import load_pem_private_key
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from redis.asyncio import Redis
 from sqlalchemy import text
 
 from alembic import command
 from app.clients.github import GitHubSignals, MockGitHubClient, get_github_client
 from app.core import s3
+from app.core.config import get_settings
+from app.core.redis import get_redis
 from app.db.session import get_engine
 from app.llm.client import ExtractedProfile, MockLLMClient, get_llm_client
 from app.main import create_app
@@ -67,12 +70,27 @@ async def _clean_db(migrated_db: None) -> AsyncIterator[None]:
 
 
 @pytest.fixture
-def app() -> FastAPI:
+async def redis_client() -> AsyncIterator[Redis]:
+    # Real Redis (up under `make test`) on a throwaway DB index, flushed
+    # around each test so single-use state never leaks between tests.
+    url = get_settings().redis_url.rsplit("/", 1)[0] + "/15"
+    client = Redis.from_url(url, decode_responses=True)
+    await client.flushdb()
+    try:
+        yield client
+    finally:
+        await client.flushdb()
+        await client.aclose()
+
+
+@pytest.fixture
+def app(redis_client: Redis) -> FastAPI:
     application = create_app()
     # Deterministic, no-network defaults; individual tests may override
     # get_llm_client/get_github_client further to exercise failure paths.
     application.dependency_overrides[get_llm_client] = lambda: MockLLMClient()
     application.dependency_overrides[get_github_client] = lambda: MockGitHubClient()
+    application.dependency_overrides[get_redis] = lambda: redis_client
     return application
 
 

@@ -11,7 +11,7 @@ from app.messaging.contracts import (
 from app.models.examiner import Role
 from app.services import submissions as submissions_service
 from app.services.verdicts import process_verdict_message
-from tests.conftest import FakePublisher, FakeQuestionClient, auth_headers
+from tests.conftest import FakeAiServiceClient, FakePublisher, FakeQuestionClient, auth_headers
 from tests.test_sessions import _headers, _setup_exam
 
 SOURCE = "a,b=map(int,input().split())\nprint(a+b)\n"
@@ -22,6 +22,7 @@ async def _submitted_exam(
     db_session: AsyncSession,
     fake_question_client: FakeQuestionClient,
     org_id: uuid.UUID,
+    fake_ai_client: FakeAiServiceClient,
 ) -> tuple[uuid.UUID, uuid.UUID]:
     """Start a session, submit once, and persist a verdict. Returns
     (exam_id, submission_id)."""
@@ -51,7 +52,9 @@ async def _submitted_exam(
             CaseResult(ordinal=2, verdict="AC", runtime_ms=22, memory_kb=15140),
         ],
     )
-    await process_verdict_message(db_session, message.model_dump_json())
+    await process_verdict_message(
+        db_session, message.model_dump_json(), ai_client=fake_ai_client
+    )
     return exam.id, submission.id
 
 
@@ -60,9 +63,10 @@ async def test_lists_submissions_for_an_exam(
     db_session: AsyncSession,
     fake_question_client: FakeQuestionClient,
     org_id: uuid.UUID,
+    fake_ai_client: FakeAiServiceClient,
 ) -> None:
     exam_id, submission_id = await _submitted_exam(
-        client, db_session, fake_question_client, org_id
+        client, db_session, fake_question_client, org_id, fake_ai_client
     )
     response = await client.get(
         f"/exams/{exam_id}/submissions", headers=auth_headers(org_id, Role.REVIEWER)
@@ -80,9 +84,10 @@ async def test_detail_returns_code_and_case_verdicts(
     db_session: AsyncSession,
     fake_question_client: FakeQuestionClient,
     org_id: uuid.UUID,
+    fake_ai_client: FakeAiServiceClient,
 ) -> None:
     _, submission_id = await _submitted_exam(
-        client, db_session, fake_question_client, org_id
+        client, db_session, fake_question_client, org_id, fake_ai_client
     )
     response = await client.get(
         f"/submissions/{submission_id}", headers=auth_headers(org_id, Role.REVIEWER)
@@ -100,9 +105,10 @@ async def test_admin_and_proctor_may_read_results(
     db_session: AsyncSession,
     fake_question_client: FakeQuestionClient,
     org_id: uuid.UUID,
+    fake_ai_client: FakeAiServiceClient,
 ) -> None:
     exam_id, _ = await _submitted_exam(
-        client, db_session, fake_question_client, org_id
+        client, db_session, fake_question_client, org_id, fake_ai_client
     )
     for role in (Role.ADMIN, Role.PROCTOR):
         response = await client.get(
@@ -116,9 +122,10 @@ async def test_author_is_denied_results(
     db_session: AsyncSession,
     fake_question_client: FakeQuestionClient,
     org_id: uuid.UUID,
+    fake_ai_client: FakeAiServiceClient,
 ) -> None:
     exam_id, submission_id = await _submitted_exam(
-        client, db_session, fake_question_client, org_id
+        client, db_session, fake_question_client, org_id, fake_ai_client
     )
     listed = await client.get(
         f"/exams/{exam_id}/submissions", headers=auth_headers(org_id, Role.AUTHOR)
@@ -135,9 +142,10 @@ async def test_cross_org_results_are_not_found(
     db_session: AsyncSession,
     fake_question_client: FakeQuestionClient,
     org_id: uuid.UUID,
+    fake_ai_client: FakeAiServiceClient,
 ) -> None:
     exam_id, submission_id = await _submitted_exam(
-        client, db_session, fake_question_client, org_id
+        client, db_session, fake_question_client, org_id, fake_ai_client
     )
     other = auth_headers(uuid.uuid4(), Role.REVIEWER)
     assert (await client.get(f"/exams/{exam_id}/submissions", headers=other)).status_code == 404

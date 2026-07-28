@@ -25,3 +25,8 @@ class ExamSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     # Server-authoritative deadline = min(started_at + duration, exam.ends_at).
     deadline_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # Adaptive difficulty engine (Phase 2 Slice 5) — set after each graded
+    # verdict from ai's /internal/difficulty/signal response. Observability
+    # only this slice: nothing yet changes what question the candidate sees.
+    current_difficulty: Mapped[float | None] = mapped_column()
+    current_difficulty_band: Mapped[str | None] = mapped_column(String(16))

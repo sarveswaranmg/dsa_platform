@@ -193,6 +193,12 @@ async def get_question_content(
     content = await client.get_version_content(
         org_id=org_id, version_id=assigned.question_version_id
     )
+    # First view of this question — start its time budget for the adaptive
+    # difficulty engine (Phase 2 Slice 5).
+    await sessions_repo.mark_shown(
+        session, org_id=org_id, session_id=exam_session.id, ordinal=ordinal
+    )
+    await session.commit()
     return assigned, content
 
 

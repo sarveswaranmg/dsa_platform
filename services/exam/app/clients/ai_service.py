@@ -34,12 +34,22 @@ class GenerationStatus:
     error: str | None
 
 
+@dataclass(frozen=True)
+class DifficultySignal:
+    difficulty: float
+    difficulty_band: str
+
+
 class AiServiceClient(Protocol):
     """The exam service reaches the ai service over HTTP only (no code
-    imports). Every call here happens inside some live, freshly-authenticated
-    examiner request (schedule-ai, a later GET, confirm, or an override), so
-    the caller's bearer token is always forwarded rather than minted fresh —
-    same pattern as `question_service.py`'s examiner-plane calls."""
+    imports). Examiner-plane calls (`propose_blueprint`, `generate_question`,
+    `get_generation_status`) happen inside some live, freshly-authenticated
+    examiner request, so the caller's bearer token is forwarded rather than
+    minted fresh. `send_difficulty_signal` is different: it's called from the
+    detached verdict-consumer background loop, which has no live token to
+    forward, so it hits an unauthenticated `/internal/...` route instead —
+    same split `question_service.py` already has between its examiner-plane
+    and internal/candidate-plane methods."""
 
     async def propose_blueprint(
         self,
@@ -63,6 +73,16 @@ class AiServiceClient(Protocol):
     async def get_generation_status(
         self, *, authorization: str, job_id: uuid.UUID
     ) -> GenerationStatus: ...
+
+    async def send_difficulty_signal(
+        self,
+        *,
+        session_id: uuid.UUID,
+        question_version_id: uuid.UUID,
+        time_elapsed_pct: float,
+        verdict: str,
+        complexity_hint: str | None,
+    ) -> DifficultySignal: ...
 
 
 class HttpAiServiceClient:
@@ -154,6 +174,34 @@ class HttpAiServiceClient:
                 uuid.UUID(item["question_version_id"]) if item["question_version_id"] else None
             ),
             error=item["error"],
+        )
+
+    async def send_difficulty_signal(
+        self,
+        *,
+        session_id: uuid.UUID,
+        question_version_id: uuid.UUID,
+        time_elapsed_pct: float,
+        verdict: str,
+        complexity_hint: str | None,
+    ) -> DifficultySignal:
+        body = {
+            "session_id": str(session_id),
+            "question_version_id": str(question_version_id),
+            "time_elapsed_pct": time_elapsed_pct,
+            "verdict": verdict,
+            "complexity_hint": complexity_hint,
+        }
+        try:
+            async with httpx.AsyncClient(base_url=self._base_url, timeout=10.0) as client:
+                response = await client.post("/internal/difficulty/signal", json=body)
+        except httpx.HTTPError as exc:
+            raise UpstreamServiceError("AI service is unavailable") from exc
+        if response.status_code != 200:
+            raise UpstreamServiceError(f"AI service returned {response.status_code}")
+        item = response.json()
+        return DifficultySignal(
+            difficulty=item["difficulty"], difficulty_band=item["difficulty_band"]
         )
 
 

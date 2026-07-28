@@ -1,6 +1,7 @@
 import uuid
+from datetime import datetime
 
-from sqlalchemy import ForeignKey, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, UUIDPrimaryKeyMixin
@@ -20,3 +21,6 @@ class SessionQuestion(UUIDPrimaryKeyMixin, Base):
     ordinal: Mapped[int]
     question_id: Mapped[uuid.UUID] = mapped_column()
     question_version_id: Mapped[uuid.UUID] = mapped_column()
+    # Set lazily on first GET of this question's content (Phase 2 Slice 5) —
+    # the adaptive difficulty engine needs a real per-question time budget.
+    shown_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

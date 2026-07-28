@@ -17,7 +17,12 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engin
 from sqlalchemy.pool import NullPool
 
 from alembic import command
-from app.clients.ai_service import BlueprintSpec, GenerationStatus, get_ai_client
+from app.clients.ai_service import (
+    BlueprintSpec,
+    DifficultySignal,
+    GenerationStatus,
+    get_ai_client,
+)
 from app.clients.question_service import (
     PublishedQuestionRef,
     QuestionRef,
@@ -228,6 +233,9 @@ class FakeAiServiceClient:
         self.jobs: dict[uuid.UUID, GenerationStatus] = {}
         self.generate_calls: list[dict[str, object]] = []
         self.seen_authorizations: list[str] = []
+        self.difficulty_signals: list[dict[str, object]] = []
+        self.difficulty_response = DifficultySignal(difficulty=3.0, difficulty_band="medium")
+        self.difficulty_signal_error: Exception | None = None
 
     def set_blueprint_spec(self, spec: BlueprintSpec) -> None:
         self.blueprint_spec = spec
@@ -276,6 +284,28 @@ class FakeAiServiceClient:
     ) -> GenerationStatus:
         self.seen_authorizations.append(authorization)
         return self.jobs[job_id]
+
+    async def send_difficulty_signal(
+        self,
+        *,
+        session_id: uuid.UUID,
+        question_version_id: uuid.UUID,
+        time_elapsed_pct: float,
+        verdict: str,
+        complexity_hint: str | None,
+    ) -> DifficultySignal:
+        self.difficulty_signals.append(
+            {
+                "session_id": session_id,
+                "question_version_id": question_version_id,
+                "time_elapsed_pct": time_elapsed_pct,
+                "verdict": verdict,
+                "complexity_hint": complexity_hint,
+            }
+        )
+        if self.difficulty_signal_error is not None:
+            raise self.difficulty_signal_error
+        return self.difficulty_response
 
 
 @pytest.fixture

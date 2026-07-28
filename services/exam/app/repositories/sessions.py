@@ -1,6 +1,6 @@
 import uuid
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,6 +36,17 @@ async def get_by_exam(
     result = await session.execute(
         select(ExamSession).where(
             ExamSession.exam_id == exam_id, ExamSession.org_id == org_id
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_by_id(
+    session: AsyncSession, *, org_id: uuid.UUID, session_id: uuid.UUID
+) -> ExamSession | None:
+    result = await session.execute(
+        select(ExamSession).where(
+            ExamSession.id == session_id, ExamSession.org_id == org_id
         )
     )
     return result.scalar_one_or_none()
@@ -86,3 +97,30 @@ async def get_question(
         )
     )
     return result.scalar_one_or_none()
+
+
+async def get_question_by_version(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    session_id: uuid.UUID,
+    question_version_id: uuid.UUID,
+) -> SessionQuestion | None:
+    result = await session.execute(
+        select(SessionQuestion).where(
+            SessionQuestion.session_id == session_id,
+            SessionQuestion.org_id == org_id,
+            SessionQuestion.question_version_id == question_version_id,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def mark_shown(
+    session: AsyncSession, *, org_id: uuid.UUID, session_id: uuid.UUID, ordinal: int
+) -> None:
+    """No-op if already set — the caller commits."""
+    question = await get_question(session, org_id=org_id, session_id=session_id, ordinal=ordinal)
+    if question is not None and question.shown_at is None:
+        question.shown_at = datetime.now(UTC)
+        await session.flush()

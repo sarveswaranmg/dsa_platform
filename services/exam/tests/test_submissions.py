@@ -22,6 +22,7 @@ from app.repositories import exams as exams_repo
 from app.repositories import submissions as submissions_repo
 from app.services import submissions as submissions_service
 from app.services.verdicts import process_verdict_message
+from tests.conftest import FakeAiServiceClient
 
 
 class FakeQuestionClient:
@@ -141,7 +142,9 @@ async def test_enqueue_rejects_missing_exam(db_session: AsyncSession) -> None:
     assert publisher.sent == []
 
 
-async def test_verdict_persistence_and_idempotency(db_session: AsyncSession) -> None:
+async def test_verdict_persistence_and_idempotency(
+    db_session: AsyncSession, fake_ai_client: FakeAiServiceClient
+) -> None:
     org_id = uuid.uuid4()
     exam_id = await _make_exam(db_session, org_id)
     submission = await submissions_service.create_and_enqueue(
@@ -166,7 +169,9 @@ async def test_verdict_persistence_and_idempotency(db_session: AsyncSession) -> 
         ],
     )
 
-    await process_verdict_message(db_session, message.model_dump_json())
+    await process_verdict_message(
+        db_session, message.model_dump_json(), ai_client=fake_ai_client
+    )
     reloaded = await submissions_repo.get_by_id(
         db_session, org_id=org_id, submission_id=submission.id
     )
@@ -179,14 +184,18 @@ async def test_verdict_persistence_and_idempotency(db_session: AsyncSession) -> 
     assert [v.ordinal for v in verdicts] == [1, 2]
 
     # Re-deliver the same verdict: no duplicate rows, still terminal.
-    await process_verdict_message(db_session, message.model_dump_json())
+    await process_verdict_message(
+        db_session, message.model_dump_json(), ai_client=fake_ai_client
+    )
     verdicts_again = await submissions_repo.list_case_verdicts(
         db_session, org_id=org_id, submission_id=submission.id
     )
     assert len(verdicts_again) == 2
 
 
-async def test_compile_error_verdict(db_session: AsyncSession) -> None:
+async def test_compile_error_verdict(
+    db_session: AsyncSession, fake_ai_client: FakeAiServiceClient
+) -> None:
     org_id = uuid.uuid4()
     exam_id = await _make_exam(db_session, org_id)
     submission = await submissions_service.create_and_enqueue(
@@ -207,7 +216,9 @@ async def test_compile_error_verdict(db_session: AsyncSession) -> None:
         compile_error="error: expected ';'",
         cases=[],
     )
-    await process_verdict_message(db_session, message.model_dump_json())
+    await process_verdict_message(
+        db_session, message.model_dump_json(), ai_client=fake_ai_client
+    )
     reloaded = await submissions_repo.get_by_id(
         db_session, org_id=org_id, submission_id=submission.id
     )
@@ -216,7 +227,9 @@ async def test_compile_error_verdict(db_session: AsyncSession) -> None:
     assert reloaded.compile_error and "expected" in reloaded.compile_error
 
 
-async def test_verdict_org_mismatch_dropped(db_session: AsyncSession) -> None:
+async def test_verdict_org_mismatch_dropped(
+    db_session: AsyncSession, fake_ai_client: FakeAiServiceClient
+) -> None:
     org_id = uuid.uuid4()
     exam_id = await _make_exam(db_session, org_id)
     submission = await submissions_service.create_and_enqueue(
@@ -237,7 +250,9 @@ async def test_verdict_org_mismatch_dropped(db_session: AsyncSession) -> None:
         summary_verdict="AC",
         cases=[CaseResult(ordinal=1, verdict="AC", runtime_ms=1, memory_kb=1)],
     )
-    await process_verdict_message(db_session, message.model_dump_json())
+    await process_verdict_message(
+        db_session, message.model_dump_json(), ai_client=fake_ai_client
+    )
     reloaded = await submissions_repo.get_by_id(
         db_session, org_id=org_id, submission_id=submission.id
     )

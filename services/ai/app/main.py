@@ -6,11 +6,19 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from app.api.routes import blueprints, generation, health, profiles, testcase_generation
+from app.api.routes import (
+    blueprints,
+    difficulty,
+    generation,
+    health,
+    profiles,
+    testcase_generation,
+)
 from app.core import s3
 from app.core.config import get_settings, validate_production_config
 from app.core.exceptions import DomainError
 from app.core.logging import RequestIdMiddleware, configure_logging
+from app.core.redis import close_redis
 from app.db.session import dispose_engine
 from app.services.gen_consumer import run_gen_result_consumer
 
@@ -34,6 +42,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             with contextlib.suppress(asyncio.CancelledError):
                 await consumer_task
         await dispose_engine()
+        await close_redis()
 
 
 async def domain_error_handler(request: Request, exc: Exception) -> JSONResponse:
@@ -50,6 +59,7 @@ def create_app() -> FastAPI:
     app.include_router(generation.router)
     app.include_router(testcase_generation.router)
     app.include_router(blueprints.router)
+    app.include_router(difficulty.router)
     return app
 
 
