@@ -19,12 +19,14 @@ async def create_submission(
     compare_mode: str,
     status: str,
     session_id: uuid.UUID | None = None,
+    ordinal: int | None = None,
     mode: str = "submit",
 ) -> Submission:
     submission = Submission(
         org_id=org_id,
         exam_id=exam_id,
         session_id=session_id,
+        ordinal=ordinal,
         question_version_id=question_version_id,
         language=language,
         source=source,
@@ -93,6 +95,17 @@ async def list_by_exam(
     result = await session.execute(
         select(Submission)
         .where(Submission.exam_id == exam_id, Submission.org_id == org_id)
+        .order_by(Submission.created_at)
+    )
+    return list(result.scalars().all())
+
+
+async def list_by_session(
+    session: AsyncSession, *, org_id: uuid.UUID, session_id: uuid.UUID
+) -> list[Submission]:
+    result = await session.execute(
+        select(Submission)
+        .where(Submission.session_id == session_id, Submission.org_id == org_id)
         .order_by(Submission.created_at)
     )
     return list(result.scalars().all())

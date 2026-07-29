@@ -78,28 +78,33 @@ def _submission_response(
 
 @router.post("/session/start", response_model=SessionResponse, status_code=201)
 async def start_session(
-    ctx: CandidateCtx, session: DB, redis: RedisDep, question_client: QuestionClient
+    ctx: CandidateCtx,
+    session: DB,
+    redis: RedisDep,
+    question_client: QuestionClient,
+    publisher: PublisherDep,
 ) -> SessionResponse:
     exam_session = await sessions_service.start_session(
         session,
         redis,
         question_client,
+        publisher,
         org_id=ctx.org_id,
         exam_id=ctx.exam_id,
         candidate_email=ctx.candidate_email,
     )
     _, questions = await sessions_service.get_session(
-        session, redis, org_id=ctx.org_id, exam_id=ctx.exam_id
+        session, redis, publisher, org_id=ctx.org_id, exam_id=ctx.exam_id
     )
     return SessionResponse.build(exam_session, questions)
 
 
 @router.get("/session", response_model=SessionResponse)
 async def get_session(
-    ctx: CandidateCtx, session: DB, redis: RedisDep
+    ctx: CandidateCtx, session: DB, redis: RedisDep, publisher: PublisherDep
 ) -> SessionResponse:
     exam_session, questions = await sessions_service.get_session(
-        session, redis, org_id=ctx.org_id, exam_id=ctx.exam_id
+        session, redis, publisher, org_id=ctx.org_id, exam_id=ctx.exam_id
     )
     return SessionResponse.build(exam_session, questions)
 

@@ -33,6 +33,7 @@ async def create_and_enqueue(
     source: str,
     compare_mode: str = "whitespace",
     session_id: uuid.UUID | None = None,
+    ordinal: int | None = None,
     mode: str = SubmissionMode.SUBMIT.value,
 ) -> Submission:
     exam = await exams_repo.get_by_id(session, org_id=org_id, exam_id=exam_id)
@@ -56,6 +57,7 @@ async def create_and_enqueue(
         org_id=org_id,
         exam_id=exam_id,
         session_id=session_id,
+        ordinal=ordinal,
         question_version_id=question_version_id,
         language=language,
         source=source,

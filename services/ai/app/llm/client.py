@@ -33,6 +33,18 @@ class ExtractedProfile(BaseModel):
     strong_signals: list[str]
 
 
+class SubmissionAssessment(BaseModel):
+    """LLM judgement of one graded submission (Phase 2 Slice 7) — feeds
+    `app/evaluation/partial_credit.py`'s deterministic scoring, never scores
+    anything itself."""
+
+    algorithm_family: str
+    approach_correct: bool
+    is_optimal: bool
+    bug_description: str | None
+    bug_severity: Literal["none", "minor", "major", "fundamental"]
+
+
 class LLMClient(Protocol):
     """Every LLM call in this service goes through this interface — never
     call a model API directly from a router or service layer."""
@@ -64,6 +76,16 @@ class LLMClient(Protocol):
         seniority_band: str,
         available_topics: list[AvailableTopic],
     ) -> BlueprintSpec: ...
+
+    async def evaluate_submission(
+        self,
+        *,
+        statement_md: str,
+        constraints_md: str,
+        language: str,
+        source: str,
+        verdict: str,
+    ) -> SubmissionAssessment: ...
 
 
 class MockLLMClient:
@@ -177,6 +199,31 @@ class MockLLMClient:
                 f"Mock proposal for a {seniority_band} {target_role} candidate "
                 f"(years_exp={profile.years_exp})."
             ),
+        )
+
+    async def evaluate_submission(
+        self,
+        *,
+        statement_md: str,
+        constraints_md: str,
+        language: str,
+        source: str,
+        verdict: str,
+    ) -> SubmissionAssessment:
+        if verdict == "AC":
+            return SubmissionAssessment(
+                algorithm_family="two_pointer",
+                approach_correct=True,
+                is_optimal=True,
+                bug_description=None,
+                bug_severity="none",
+            )
+        return SubmissionAssessment(
+            algorithm_family="two_pointer",
+            approach_correct=True,
+            is_optimal=False,
+            bug_description="off-by-one in the loop bound",
+            bug_severity="minor",
         )
 
 
@@ -348,6 +395,31 @@ class AnthropicLLMClient:
         )
         text = await self._call(prompt, model=self._DRAFT_MODEL)
         return BlueprintSpec.model_validate_json(text)
+
+    async def evaluate_submission(
+        self,
+        *,
+        statement_md: str,
+        constraints_md: str,
+        language: str,
+        source: str,
+        verdict: str,
+    ) -> SubmissionAssessment:
+        prompt = (
+            f"Problem:\n{statement_md}\n\nConstraints:\n{constraints_md}\n\n"
+            f"Candidate's {language} submission (judged verdict: {verdict}):\n"
+            f"{source}\n\n"
+            "Assess this submission. Respond with strict JSON matching: "
+            "algorithm_family (string, e.g. \"two_pointer\", \"dp\", \"bfs\"), "
+            "approach_correct (bool — is the overall algorithmic approach "
+            "sound for this problem, regardless of implementation bugs), "
+            "is_optimal (bool), bug_description (string or null — the "
+            "specific bug if the verdict wasn't AC), bug_severity "
+            "(\"none\"|\"minor\"|\"major\"|\"fundamental\" — \"fundamental\" "
+            "means the approach itself is wrong, not just buggy)."
+        )
+        text = await self._call(prompt, model=self._DRAFT_MODEL)
+        return SubmissionAssessment.model_validate_json(text)
 
 
 def get_llm_client() -> LLMClient:

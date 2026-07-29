@@ -29,7 +29,12 @@ class Submission(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     org_id: Mapped[uuid.UUID] = mapped_column(index=True)
     exam_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("exams.id"), index=True)
     # Nullable until Slice 6 wires the session lifecycle around submissions.
-    session_id: Mapped[uuid.UUID | None] = mapped_column()
+    session_id: Mapped[uuid.UUID | None] = mapped_column(index=True)
+    # Nullable: not every submission is session-scoped yet either (mirrors
+    # session_id above). Populated by app/services/sessions.py::submit — lets
+    # Slice 7's evaluation regroup a question's submissions by slot even after
+    # a Slice 6 follow-up changes question_version_id mid-session.
+    ordinal: Mapped[int | None] = mapped_column()
     question_version_id: Mapped[uuid.UUID] = mapped_column()
     language: Mapped[str] = mapped_column(String(16))
     source: Mapped[str] = mapped_column(Text)

@@ -8,7 +8,12 @@ import pytest
 from fastapi import FastAPI
 from httpx import AsyncClient
 
-from app.clients.question_service import QuestionCreated, TestCaseUpload, get_question_client
+from app.clients.question_service import (
+    QuestionCreated,
+    TestCaseUpload,
+    VersionContent,
+    get_question_client,
+)
 from app.core import s3
 from app.core.config import get_settings
 from app.db.session import get_sessionmaker
@@ -73,6 +78,9 @@ class SucceedingQuestionClient:
     async def create_test_case_upload(self, **kwargs: Any) -> TestCaseUpload:
         raise NotImplementedError
 
+    async def get_version_content(self, **kwargs: Any) -> VersionContent:
+        raise NotImplementedError
+
 
 class FakeQuestionClientForFactory:
     """Returns real presigned PUT URLs against ai's own bucket (not
@@ -97,6 +105,9 @@ class FakeQuestionClientForFactory:
             upload_input_url=s3.presign_put(input_key),
             upload_output_url=s3.presign_put(output_key),
         )
+
+    async def get_version_content(self, **kwargs: Any) -> VersionContent:
+        raise NotImplementedError
 
 
 class PartiallyInvalidLLMClient(MockLLMClient):

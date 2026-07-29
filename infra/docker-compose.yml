@@ -238,6 +238,9 @@ services:
       # DiffResults, same localstack queue broker as judge-live.
       SQS_ENDPOINT_URL: http://localstack:4566
       QUESTION_SERVICE_URL: http://question:8000
+      # Session evaluation (Phase 2 Slice 7) — fetches a session's submission
+      # history via exam's internal endpoint.
+      EXAM_SERVICE_URL: http://exam:8000
       # Adaptive difficulty engine (Phase 2 Slice 5) — per-session state.
       REDIS_URL: redis://redis:6379/0
       # Mock by default — no Anthropic key or GitHub token required in dev.

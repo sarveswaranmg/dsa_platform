@@ -48,6 +48,30 @@ async def test_mock_client_generates_valid_test_case_candidates() -> None:
         assert validate_input(case.input, draft.input_spec) == []
 
 
+async def test_mock_client_evaluate_submission_ac_is_optimal_no_bug() -> None:
+    client = MockLLMClient()
+    assessment = await client.evaluate_submission(
+        statement_md="stmt", constraints_md="1<=n<=10", language="python",
+        source="print(1)", verdict="AC",
+    )
+    assert assessment.approach_correct is True
+    assert assessment.is_optimal is True
+    assert assessment.bug_severity == "none"
+    assert assessment.bug_description is None
+
+
+async def test_mock_client_evaluate_submission_non_ac_reports_a_minor_bug() -> None:
+    client = MockLLMClient()
+    assessment = await client.evaluate_submission(
+        statement_md="stmt", constraints_md="1<=n<=10", language="python",
+        source="print(1)", verdict="WA",
+    )
+    assert assessment.approach_correct is True
+    assert assessment.is_optimal is False
+    assert assessment.bug_severity == "minor"
+    assert assessment.bug_description is not None
+
+
 def test_get_llm_client_selects_mock_by_default() -> None:
     assert get_settings().llm_backend == "mock"
     assert isinstance(get_llm_client(), MockLLMClient)

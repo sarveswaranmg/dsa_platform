@@ -18,8 +18,10 @@ from app.clients.question_service import (
     QuestionServiceClient,
     VersionContent,
 )
+from app.core.config import get_settings
 from app.core.exceptions import ExamWindowClosed, NotFound, SessionLocked
 from app.core.redis_keys import session_key
+from app.messaging.eval_contracts import SessionCompleteEvent
 from app.messaging.sqs import QueuePublisher
 from app.models.exam_session import ExamSession, SessionStatus
 from app.models.session_question import SessionQuestion
@@ -50,7 +52,7 @@ async def _mirror_to_redis(
 
 
 async def _lock_if_expired(
-    session: AsyncSession, redis: Redis, exam_session: ExamSession
+    session: AsyncSession, redis: Redis, publisher: QueuePublisher, exam_session: ExamSession
 ) -> ExamSession:
     if (
         exam_session.status == SessionStatus.IN_PROGRESS.value
@@ -60,6 +62,17 @@ async def _lock_if_expired(
         exam_session.status = SessionStatus.EXPIRED.value
         await session.commit()
         await _mirror_to_redis(redis, exam_session)
+        # Phase 2 Slice 7: this is the only "session ended" transition that
+        # exists today (no scheduler, no explicit finish-early endpoint) —
+        # fires the AI evaluation pipeline off the back of it.
+        publisher.send(
+            get_settings().session_complete_queue,
+            SessionCompleteEvent(
+                org_id=exam_session.org_id,
+                session_id=exam_session.id,
+                exam_id=exam_session.exam_id,
+            ).model_dump_json(),
+        )
     return exam_session
 
 
@@ -67,6 +80,7 @@ async def start_session(
     session: AsyncSession,
     redis: Redis,
     client: QuestionServiceClient,
+    publisher: QueuePublisher,
     *,
     org_id: uuid.UUID,
     exam_id: uuid.UUID,
@@ -78,7 +92,7 @@ async def start_session(
 
     existing = await sessions_repo.get_by_exam(session, org_id=org_id, exam_id=exam_id)
     if existing is not None:
-        return await _lock_if_expired(session, redis, existing)  # idempotent resume
+        return await _lock_if_expired(session, redis, publisher, existing)  # idempotent resume
 
     now = datetime.now(UTC)
     if now < exam.starts_at or now >= exam.ends_at:
@@ -182,12 +196,17 @@ async def start_session(
 
 
 async def get_session(
-    session: AsyncSession, redis: Redis, *, org_id: uuid.UUID, exam_id: uuid.UUID
+    session: AsyncSession,
+    redis: Redis,
+    publisher: QueuePublisher,
+    *,
+    org_id: uuid.UUID,
+    exam_id: uuid.UUID,
 ) -> tuple[ExamSession, list[SessionQuestion]]:
     exam_session = await sessions_repo.get_by_exam(session, org_id=org_id, exam_id=exam_id)
     if exam_session is None:
         raise NotFound("Session not started")
-    await _lock_if_expired(session, redis, exam_session)
+    await _lock_if_expired(session, redis, publisher, exam_session)
     questions = list(
         await sessions_repo.list_questions(
             session, org_id=org_id, session_id=exam_session.id
@@ -241,7 +260,7 @@ async def submit(
     exam_session = await sessions_repo.get_by_exam(session, org_id=org_id, exam_id=exam_id)
     if exam_session is None:
         raise NotFound("Session not started")
-    await _lock_if_expired(session, redis, exam_session)
+    await _lock_if_expired(session, redis, publisher, exam_session)
     if exam_session.status != SessionStatus.IN_PROGRESS.value:
         raise SessionLocked()
 
@@ -262,5 +281,6 @@ async def submit(
         language=language,
         source=source,
         session_id=exam_session.id,
+        ordinal=ordinal,
         mode=mode,
     )

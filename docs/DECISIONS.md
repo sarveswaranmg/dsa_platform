@@ -3,6 +3,64 @@
 Short, dated records of significant technical decisions and the reasoning
 behind them. Newest first.
 
+## AI evaluation: piggyback on lazy session expiry, ai calls exam for the first time (2026-07-29)
+
+**Decision:** Phase 2 Slice 7 adds async post-session evaluation —
+complexity classification, LLM-assessed algorithm approach, deterministic
+partial credit, and behavioural signals — stored one row per
+`(session_id, ordinal)` in a new `session_evaluations` table in
+`services/ai`. The trigger is exam's existing lazy expiry check
+(`_lock_if_expired` in `app/services/sessions.py`) — the only place
+`IN_PROGRESS → EXPIRED` happens today (no scheduler, no explicit
+finish-early endpoint exists). It now publishes a lightweight
+`SessionCompleteEvent` (`org_id`, `session_id`, `exam_id`) to a new
+`dsa-session-complete` queue right after the transition commits. This
+means evaluation only starts once something re-touches an expired session
+(the candidate's own poll, or a late submit attempt) — an accepted,
+already-existing lag in this codebase's session-lifecycle model, not
+something this slice fixes.
+
+`services/ai` calls `services/exam` over HTTP for the first time (every
+prior cross-service call in this codebase ran the other direction — exam
+calling question/ai). A new internal, unauthenticated `GET
+/internal/sessions/{id}/questions` returns **assigned questions with their
+submission history nested**, not a flat submission list — the first draft
+of this design returned submissions only, which left no way to discover
+an assigned ordinal's `question_id` when it had zero submissions (a
+session-review Plan-agent pass caught this gap before implementation).
+`Submission` also gained a nullable `ordinal` column: after a Slice 6
+follow-up changes `question_version_id` mid-session, grouping a question's
+submissions back to "the same slot" by `question_version_id` alone
+breaks, so `ordinal` (already available at submit time) is now stored
+directly.
+
+**Partial credit is a pure deterministic function** (`app/evaluation/
+partial_credit.py`, mirrors Slice 5's `difficulty/rules.py` style) —
+AC=1.0, correct-approach+minor-bug=0.7, correct-approach+major-bug=0.4,
+otherwise 0.1, no submission=0.0. `approach_correct`/`bug_severity` come
+from a new `LLMClient.evaluate_submission` call (one per graded question,
+matching every other `LLMClient` method's per-artifact scope) — the LLM
+only assesses, it never scores. Complexity classification is also LLM-free:
+real `ast` analysis for Python (max loop-nesting depth, plus a sort-call
+check for O(n log n) and a self-recursion check for a rough O(2^n)
+label), and a basic brace-nesting heuristic for Java/C++ (no AST
+available) — deliberately simple, per the slice's own scope.
+
+**Why not a real scheduler for session expiry:** would be new
+infrastructure (a poller/cron task) that doesn't exist anywhere in this
+codebase, for a side project's traffic pattern where an examiner or the
+candidate's own client re-touching the session within a reasonable window
+is good enough. Revisit if evaluation latency after a session ends turns
+out to matter in practice.
+
+**Status:** Implemented and verified end-to-end through the real stack
+(judge grades a submission → deadline wound into the past → candidate's
+next poll expires the session and publishes `session-complete` → ai's new
+exam client fetches the submission history → a `session_evaluations` row
+lands with the expected `partial_score`/`complexity`/signals). Feeds
+Slice 8's hiring report via the new `evaluation-complete` event — the
+report itself isn't built yet.
+
 ## Live proctoring: real WS proxying at the gateway, event-sourced sessions, lineage-based follow-up test cases (2026-07-29)
 
 **Decision:** Phase 2 Slice 6 adds WebSocket infrastructure end to end —

@@ -352,7 +352,10 @@ async def test_timer_expiry_locks_session_and_blocks_submit(
         json={"language": "python", "source": "print(1)\n"},
     )
     assert submit.status_code == 409  # locked
-    assert captured_jobs.sent == []  # nothing enqueued after expiry
+    # Nothing enqueued to the judge, but the expiry transition itself
+    # (which the failed submit attempt still triggers) fires session-complete
+    # for the AI evaluation pipeline (Phase 2 Slice 7).
+    assert [queue for queue, _ in captured_jobs.sent] == ["dsa-session-complete"]
 
     state = (await client.get("/candidate/session", headers=headers)).json()
     assert state["status"] == SessionStatus.EXPIRED.value

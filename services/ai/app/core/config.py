@@ -46,10 +46,20 @@ class Settings(BaseSettings):
     # enable_verdict_consumer).
     enable_gen_result_consumer: bool = True
 
+    # Session evaluation (Phase 2 Slice 7) — fired by exam once a session
+    # locks; independent lane, never mixed with judge-live/judge-gen.
+    session_complete_queue: str = "dsa-session-complete"
+    evaluation_complete_queue: str = "dsa-evaluation-complete"
+    enable_session_evaluation_consumer: bool = True
+
     # Question service (HTTP only — no code imports). Used by the generation
     # results consumer to create a question once solutions agree; the
     # internal endpoint needs no bearer token (see app/clients/question_service.py).
     question_service_url: str = "http://localhost:8002"
+    # Exam service (HTTP only — no code imports). Used by the session-
+    # evaluation consumer to fetch a session's submission history
+    # (see app/clients/exam_service.py).
+    exam_service_url: str = "http://localhost:8001"
 
     # Adaptive difficulty engine (Phase 2 Slice 5) — per-session difficulty
     # state lives here, keyed by session_id (app/core/redis_keys.py).

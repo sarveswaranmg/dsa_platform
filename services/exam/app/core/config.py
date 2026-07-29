@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     sqs_endpoint_url: str = "http://localhost:4566"
     submissions_queue: str = "dsa-submissions"
     verdicts_queue: str = "dsa-verdicts"
+    # Phase 2 Slice 7: fired once a session locks (expiry), consumed by ai's
+    # evaluation pipeline. Independent lane — never mixed with judge-live.
+    session_complete_queue: str = "dsa-session-complete"
     aws_access_key_id: str = "test"
     aws_secret_access_key: str = "test"
     aws_region: str = "us-east-1"

@@ -14,6 +14,7 @@ from app.api.routes import (
     exams,
     followups,
     health,
+    internal,
     results,
 )
 from app.core.config import get_settings, validate_production_config
@@ -63,6 +64,7 @@ def create_app() -> FastAPI:
     app.include_router(results.router)
     app.include_router(candidate.router)
     app.include_router(followups.router)
+    app.include_router(internal.router)
     app.include_router(candidate_ws.router)
     app.include_router(proctor_ws.router)
     return app
