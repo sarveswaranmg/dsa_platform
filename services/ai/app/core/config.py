@@ -51,6 +51,9 @@ class Settings(BaseSettings):
     session_complete_queue: str = "dsa-session-complete"
     evaluation_complete_queue: str = "dsa-evaluation-complete"
     enable_session_evaluation_consumer: bool = True
+    # Hiring report (Phase 2 Slice 8) — the only reader of
+    # evaluation_complete_queue above.
+    enable_hiring_report_consumer: bool = True
 
     # Question service (HTTP only — no code imports). Used by the generation
     # results consumer to create a question once solutions agree; the

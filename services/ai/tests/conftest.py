@@ -65,7 +65,7 @@ async def _clean_db(migrated_db: None) -> AsyncIterator[None]:
         await connection.execute(
             text(
                 "TRUNCATE TABLE candidate_profiles, generation_jobs, test_case_generation_jobs, "
-                "session_evaluations"
+                "session_evaluations, hiring_reports"
             )
         )
 

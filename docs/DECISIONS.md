@@ -3,6 +3,70 @@
 Short, dated records of significant technical decisions and the reasoning
 behind them. Newest first.
 
+## Hiring report: evidence is deterministic not LLM-authored, exam gets its first write route (2026-07-29)
+
+**Decision:** Phase 2 Slice 8 (the final Phase 2 slice) closes the loop
+Slice 7 opened: once `evaluation-complete` fires, a new `services/ai`
+consumer (`app/services/hiring_report_consumer.py`) synthesizes a
+`HiringReport` (architecture.md §4.4.6's exact shape — seniority match,
+strong/weak areas, code quality, problem-solving narrative, overall
+score, recommendation, per-question evidence), stores it in a new
+`hiring_reports` table, and pushes it into exam. Exam serves it via
+`GET /exams/{exam_id}/report` (`Role.REVIEWER`/`Role.ADMIN` only — a
+narrower gate than `results.py`'s existing `ADMIN, REVIEWER, PROCTOR`,
+since a proctor monitors live sessions but doesn't make hiring calls),
+and emails every reviewer/admin in the org once it's ready.
+
+**The `evidence` array is assembled deterministically, not LLM-authored.**
+Everything in it — verdict, approach, complexity, partial_score, question
+title — is already known from Slice 7's `session_evaluations` table plus
+exam/question lookups. `LLMClient.synthesize_hiring_report` therefore
+returns a *narrower* `HiringReportNarrative` schema (only the narrative/
+judgement fields), fed the evidence as prompt *input* to ground its
+claims in; the service merges the two before validating and storing the
+full `HiringReport`. This keeps the LLM's JSON contract small (a
+malformed response can only break the narrative, never the factual
+evidence table) and matches "cite specific evidence for every claim"
+literally — citing evidence already known, not inventing it.
+
+**Two small additive fixes to long-standing gaps, surfaced by this
+slice's needs, confirmed with the user before implementing:**
+- `Exam.candidate_profile_id` — Mode 2's `schedule_ai_exam` always
+  received this as a parameter but discarded it after calling ai; now
+  persisted (nullable, `NULL` for Mode 1 manual exams) so the report can
+  fetch the real candidate profile instead of only ever falling back to
+  the blueprint's `experience_band`.
+- Report storage is three columns directly on `ExamSession`
+  (`hiring_report_json`, `hiring_report_recommendation`,
+  `hiring_report_generated_at`), not a new exam-side table — it's a
+  1:1-per-session singleton, mirroring Slice 5's `current_difficulty`/
+  `current_difficulty_band` columns rather than Slice 6's genuinely
+  append-only `session_events` table.
+
+**exam gets its first internal *write* route.** Every prior internal
+call in this codebase either went exam→question, exam→ai, or (Slice 7)
+ai→exam as a *read*. `POST /internal/sessions/{id}/report` is the first
+case of another service pushing computed data into exam. It also
+introduces the codebase's first fan-out email — there's no exam→examiner
+addressing anywhere (examiners are org-wide, exams have no owner), so
+the report-ready notification goes to every `REVIEWER`/`ADMIN` examiner
+in the org rather than one recipient, unlike every prior `EmailSender`
+call site (`scheduling.py::send_invite` addresses a single known
+candidate email).
+
+**`ai`'s `hiring_reports` upsert is `on_conflict_do_update`**, not
+`do_nothing` like Slice 7's `session_evaluations` — a redelivered
+`evaluation-complete` event (or a non-deterministic real LLM backend)
+must keep ai's row and exam's cached columns in agreement; `do_nothing`
+would let a stale first-attempt report win permanently.
+
+**Status:** Implemented and verified end-to-end through the real stack
+(judge grades a submission → session expiry fires the full Slice 7→8
+pipeline → a `hiring_reports` row is synthesized and pushed to exam →
+`GET /exams/{id}/report` returns it to a reviewer token → the console
+email backend logs a report-ready notification to the org's admin/
+reviewer examiners). This completes Phase 2.
+
 ## AI evaluation: piggyback on lazy session expiry, ai calls exam for the first time (2026-07-29)
 
 **Decision:** Phase 2 Slice 7 adds async post-session evaluation —

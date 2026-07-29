@@ -5,6 +5,7 @@ import type {
   Exam,
   ExamScheduled,
   Examiner,
+  HiringReport,
   Question,
   QuestionListItem,
   QuestionPayload,
@@ -185,4 +186,8 @@ export function listExamSubmissions(
 
 export function getSubmissionDetail(id: string): Promise<SubmissionDetail> {
   return examinerFetch<SubmissionDetail>(`/submissions/${id}`)
+}
+
+export function getHiringReport(examId: string): Promise<HiringReport> {
+  return examinerFetch<HiringReport>(`/exams/${examId}/report`)
 }

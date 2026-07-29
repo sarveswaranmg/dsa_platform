@@ -3,11 +3,13 @@ import { useState } from 'react'
 
 import type { SubmissionResponse } from '../../api/types'
 import {
+  getHiringReport,
   getSubmissionDetail,
   listExamSubmissions,
   listExams,
 } from '../../api/examiner/endpoints'
 import { CodeViewer } from '../../components/examiner/CodeViewer'
+import { HiringReportPanel } from '../../components/HiringReportPanel'
 import { VerdictPanel } from '../../components/VerdictPanel'
 
 import './ResultsPage.css'
@@ -27,10 +29,19 @@ export function ResultsPage() {
     queryFn: () => getSubmissionDetail(submissionId!),
     enabled: submissionId !== null,
   })
+  const report = useQuery({
+    queryKey: ['hiring-report', examId],
+    queryFn: () => getHiringReport(examId!),
+    enabled: examId !== null,
+    // A 404 here is expected steady-state (report not generated yet, or
+    // nothing was ever submitted) — not a transient failure to retry.
+    retry: false,
+  })
 
   return (
     <section className="results">
       <h1>Results</h1>
+      {examId !== null && <HiringReportPanel report={report.data} />}
       <div className="results__grid">
         <div>
           <h2>Candidates</h2>

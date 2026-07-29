@@ -95,6 +95,7 @@ async def schedule_ai_exam(
         status=ExamStatus.PENDING_GENERATION,
     )
     exam.language_targets = language_targets
+    exam.candidate_profile_id = candidate_profile_id
 
     ordinal = 1
     for slot in spec.topic_mix:

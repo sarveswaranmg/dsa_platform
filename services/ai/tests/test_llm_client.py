@@ -1,9 +1,13 @@
+import uuid
+
 import pytest
 
 from app.clients.github import GitHubSignals
 from app.core.config import get_settings
 from app.generation.validate import validate_draft, validate_input
 from app.llm.client import AnthropicLLMClient, MockLLMClient, get_llm_client
+from app.models.candidate_profile import CandidateProfile
+from app.schemas.hiring_report import HiringReportEvidence
 
 
 async def test_mock_client_is_deterministic() -> None:
@@ -70,6 +74,59 @@ async def test_mock_client_evaluate_submission_non_ac_reports_a_minor_bug() -> N
     assert assessment.is_optimal is False
     assert assessment.bug_severity == "minor"
     assert assessment.bug_description is not None
+
+
+async def test_mock_client_synthesizes_a_proceed_report_for_high_scores() -> None:
+    client = MockLLMClient()
+    narrative = await client.synthesize_hiring_report(
+        target_role="Backend Engineer",
+        experience_band="senior",
+        profile=None,
+        evidence=[
+            HiringReportEvidence(
+                question="Two Sum", verdict="AC", approach="hashmap",
+                complexity="O(n)", partial_score=1.0,
+            ),
+            HiringReportEvidence(
+                question="BFS Shortest Path", verdict="AC", approach="bfs",
+                complexity="O(V+E)", partial_score=0.8,
+            ),
+        ],
+    )
+    assert narrative.recommendation == "proceed"
+    assert narrative.overall_score == 0.9
+    assert narrative.strong_areas == ["Two Sum", "BFS Shortest Path"]
+    assert narrative.weak_areas == []
+    assert narrative.seniority_match == "senior"  # no profile -> falls back to experience_band
+
+
+async def test_mock_client_synthesizes_a_reject_report_for_low_scores() -> None:
+    client = MockLLMClient()
+    narrative = await client.synthesize_hiring_report(
+        target_role="Backend Engineer",
+        experience_band="senior",
+        profile=None,
+        evidence=[
+            HiringReportEvidence(
+                question="Two Sum", verdict="WA", approach="brute force",
+                complexity="O(n^2)", partial_score=0.1,
+            ),
+        ],
+    )
+    assert narrative.recommendation == "reject"
+    assert narrative.weak_areas == ["Two Sum"]
+    assert narrative.strong_areas == []
+
+
+async def test_mock_client_uses_profile_seniority_when_available() -> None:
+    client = MockLLMClient()
+    profile = CandidateProfile(
+        org_id=uuid.uuid4(), status="ready", resume_s3_key="x", seniority_estimate="staff",
+    )
+    narrative = await client.synthesize_hiring_report(
+        target_role="Backend Engineer", experience_band="senior", profile=profile, evidence=[],
+    )
+    assert narrative.seniority_match == "staff"
 
 
 def test_get_llm_client_selects_mock_by_default() -> None:

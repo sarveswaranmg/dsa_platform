@@ -10,6 +10,7 @@ from app.messaging.contracts import (
     VerdictStatus,
 )
 from app.models.examiner import Role
+from app.repositories import sessions as sessions_repo
 from app.services import submissions as submissions_service
 from app.services.verdicts import process_verdict_message
 from tests.conftest import FakeAiServiceClient, FakePublisher, FakeQuestionClient, auth_headers
@@ -163,3 +164,79 @@ async def test_cross_org_results_are_not_found(
 async def test_results_require_a_token(client: AsyncClient) -> None:
     assert (await client.get(f"/exams/{uuid.uuid4()}/submissions")).status_code == 401
     assert (await client.get(f"/submissions/{uuid.uuid4()}")).status_code == 401
+
+
+async def test_hiring_report_not_found_before_generation(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fake_question_client: FakeQuestionClient,
+    org_id: uuid.UUID,
+    fake_ai_client: FakeAiServiceClient,
+    redis_client: Redis,
+) -> None:
+    exam_id, _ = await _submitted_exam(
+        client, db_session, fake_question_client, org_id, fake_ai_client, redis_client
+    )
+    response = await client.get(
+        f"/exams/{exam_id}/report", headers=auth_headers(org_id, Role.REVIEWER)
+    )
+    assert response.status_code == 404
+
+
+async def test_hiring_report_returned_after_generation(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fake_question_client: FakeQuestionClient,
+    org_id: uuid.UUID,
+    fake_ai_client: FakeAiServiceClient,
+    redis_client: Redis,
+) -> None:
+    exam_id, _ = await _submitted_exam(
+        client, db_session, fake_question_client, org_id, fake_ai_client, redis_client
+    )
+    exam_session = await sessions_repo.get_by_exam(db_session, org_id=org_id, exam_id=exam_id)
+    assert exam_session is not None
+    session_id = exam_session.id
+
+    report_json = {
+        "seniority_match": "SDE-2",
+        "strong_areas": ["arrays"],
+        "weak_areas": [],
+        "code_quality": "production-grade",
+        "problem_solving": "optimal",
+        "overall_score": 0.9,
+        "recommendation": "proceed",
+        "evidence": [],
+    }
+    attach = await client.post(
+        f"/internal/sessions/{session_id}/report",
+        json={"org_id": str(org_id), "report_json": report_json, "recommendation": "proceed"},
+    )
+    assert attach.status_code == 204, attach.text
+
+    response = await client.get(
+        f"/exams/{exam_id}/report", headers=auth_headers(org_id, Role.REVIEWER)
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["seniority_match"] == "SDE-2"
+    assert body["recommendation"] == "proceed"
+    assert body["generated_at"] is not None
+
+
+async def test_hiring_report_gated_to_reviewer_and_admin_only(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fake_question_client: FakeQuestionClient,
+    org_id: uuid.UUID,
+    fake_ai_client: FakeAiServiceClient,
+    redis_client: Redis,
+) -> None:
+    exam_id, _ = await _submitted_exam(
+        client, db_session, fake_question_client, org_id, fake_ai_client, redis_client
+    )
+    for role in (Role.PROCTOR, Role.AUTHOR):
+        response = await client.get(
+            f"/exams/{exam_id}/report", headers=auth_headers(org_id, role)
+        )
+        assert response.status_code == 403, f"{role} should be denied the hiring report"

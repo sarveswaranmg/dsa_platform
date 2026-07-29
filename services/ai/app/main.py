@@ -22,6 +22,7 @@ from app.core.logging import RequestIdMiddleware, configure_logging
 from app.core.redis import close_redis
 from app.db.session import dispose_engine
 from app.services.gen_consumer import run_gen_result_consumer
+from app.services.hiring_report_consumer import run_hiring_report_consumer
 from app.services.session_evaluation_consumer import run_session_evaluation_consumer
 
 
@@ -34,15 +35,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     stop = asyncio.Event()
     consumer_task: asyncio.Task[None] | None = None
     eval_consumer_task: asyncio.Task[None] | None = None
+    report_consumer_task: asyncio.Task[None] | None = None
     if get_settings().enable_gen_result_consumer:
         consumer_task = asyncio.create_task(run_gen_result_consumer(stop))
     if get_settings().enable_session_evaluation_consumer:
         eval_consumer_task = asyncio.create_task(run_session_evaluation_consumer(stop))
+    if get_settings().enable_hiring_report_consumer:
+        report_consumer_task = asyncio.create_task(run_hiring_report_consumer(stop))
     try:
         yield
     finally:
         stop.set()
-        for task in (consumer_task, eval_consumer_task):
+        for task in (consumer_task, eval_consumer_task, report_consumer_task):
             if task is not None:
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):

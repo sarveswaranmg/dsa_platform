@@ -1,7 +1,7 @@
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Protocol
+from typing import Any, Protocol
 
 import httpx
 
@@ -27,6 +27,14 @@ class AssignedQuestion:
     submissions: list[SubmissionRecord]
 
 
+@dataclass(frozen=True)
+class SessionContext:
+    candidate_email: str
+    target_role: str
+    experience_band: str
+    candidate_profile_id: uuid.UUID | None
+
+
 class ExamServiceClient(Protocol):
     """The ai service reaches the exam service over HTTP only (no code
     imports), via the trusted-network internal endpoint — the session-
@@ -36,6 +44,19 @@ class ExamServiceClient(Protocol):
     async def list_session_questions(
         self, *, org_id: uuid.UUID, session_id: uuid.UUID
     ) -> list[AssignedQuestion]: ...
+
+    async def get_session_context(
+        self, *, org_id: uuid.UUID, session_id: uuid.UUID
+    ) -> SessionContext: ...
+
+    async def attach_hiring_report(
+        self,
+        *,
+        org_id: uuid.UUID,
+        session_id: uuid.UUID,
+        report_json: dict[str, Any],
+        recommendation: str,
+    ) -> None: ...
 
 
 class HttpExamServiceClient:
@@ -76,6 +97,57 @@ class HttpExamServiceClient:
             )
             for item in response.json()
         ]
+
+    async def get_session_context(
+        self, *, org_id: uuid.UUID, session_id: uuid.UUID
+    ) -> SessionContext:
+        try:
+            async with httpx.AsyncClient(base_url=self._base_url, timeout=10.0) as client:
+                response = await client.get(
+                    f"/internal/sessions/{session_id}", params={"org_id": str(org_id)}
+                )
+        except httpx.HTTPError as exc:
+            raise UpstreamServiceError("Exam service is unavailable") from exc
+        if response.status_code == 404:
+            raise NotFound("Session not found")
+        if response.status_code != 200:
+            raise UpstreamServiceError(f"Exam service returned {response.status_code}")
+        item = response.json()
+        return SessionContext(
+            candidate_email=item["candidate_email"],
+            target_role=item["target_role"],
+            experience_band=item["experience_band"],
+            candidate_profile_id=(
+                uuid.UUID(item["candidate_profile_id"])
+                if item["candidate_profile_id"]
+                else None
+            ),
+        )
+
+    async def attach_hiring_report(
+        self,
+        *,
+        org_id: uuid.UUID,
+        session_id: uuid.UUID,
+        report_json: dict[str, Any],
+        recommendation: str,
+    ) -> None:
+        body = {
+            "org_id": str(org_id),
+            "report_json": report_json,
+            "recommendation": recommendation,
+        }
+        try:
+            async with httpx.AsyncClient(base_url=self._base_url, timeout=10.0) as client:
+                response = await client.post(
+                    f"/internal/sessions/{session_id}/report", json=body
+                )
+        except httpx.HTTPError as exc:
+            raise UpstreamServiceError("Exam service is unavailable") from exc
+        if response.status_code == 404:
+            raise NotFound("Session not found")
+        if response.status_code != 204:
+            raise UpstreamServiceError(f"Exam service returned {response.status_code}")
 
 
 def get_exam_client() -> ExamServiceClient:

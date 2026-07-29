@@ -18,6 +18,7 @@ from app.generation.schemas import (
     InputVar,
 )
 from app.models.candidate_profile import CandidateProfile
+from app.schemas.hiring_report import HiringReportEvidence
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,23 @@ class SubmissionAssessment(BaseModel):
     is_optimal: bool
     bug_description: str | None
     bug_severity: Literal["none", "minor", "major", "fundamental"]
+
+
+class HiringReportNarrative(BaseModel):
+    """LLM-authored narrative half of a hiring report (Phase 2 Slice 8) —
+    the `evidence` array is assembled deterministically by the consumer
+    from session_evaluations/exam/question data and merged in afterward
+    (see app/schemas/hiring_report.py's full `HiringReport`); this schema
+    stays narrow so a malformed response can only ever break the narrative,
+    never the factual evidence table."""
+
+    seniority_match: str
+    strong_areas: list[str]
+    weak_areas: list[str]
+    code_quality: str
+    problem_solving: str
+    overall_score: float
+    recommendation: Literal["proceed", "maybe", "reject"]
 
 
 class LLMClient(Protocol):
@@ -86,6 +104,15 @@ class LLMClient(Protocol):
         source: str,
         verdict: str,
     ) -> SubmissionAssessment: ...
+
+    async def synthesize_hiring_report(
+        self,
+        *,
+        target_role: str,
+        experience_band: str,
+        profile: CandidateProfile | None,
+        evidence: list[HiringReportEvidence],
+    ) -> HiringReportNarrative: ...
 
 
 class MockLLMClient:
@@ -224,6 +251,38 @@ class MockLLMClient:
             is_optimal=False,
             bug_description="off-by-one in the loop bound",
             bug_severity="minor",
+        )
+
+    async def synthesize_hiring_report(
+        self,
+        *,
+        target_role: str,
+        experience_band: str,
+        profile: CandidateProfile | None,
+        evidence: list[HiringReportEvidence],
+    ) -> HiringReportNarrative:
+        scores = [e.partial_score for e in evidence]
+        overall = sum(scores) / len(scores) if scores else 0.0
+        if overall >= 0.7:
+            recommendation: Literal["proceed", "maybe", "reject"] = "proceed"
+        elif overall >= 0.4:
+            recommendation = "maybe"
+        else:
+            recommendation = "reject"
+        strong_areas = [e.question for e in evidence if e.partial_score >= 0.7]
+        weak_areas = [e.question for e in evidence if e.partial_score < 0.7]
+        return HiringReportNarrative(
+            seniority_match=(
+                profile.seniority_estimate
+                if profile is not None and profile.seniority_estimate
+                else experience_band
+            ),
+            strong_areas=strong_areas,
+            weak_areas=weak_areas,
+            code_quality="production-grade" if overall >= 0.7 else "needs polish",
+            problem_solving=f"Mock synthesis for a {experience_band} {target_role} candidate.",
+            overall_score=overall,
+            recommendation=recommendation,
         )
 
 
@@ -420,6 +479,41 @@ class AnthropicLLMClient:
         )
         text = await self._call(prompt, model=self._DRAFT_MODEL)
         return SubmissionAssessment.model_validate_json(text)
+
+    async def synthesize_hiring_report(
+        self,
+        *,
+        target_role: str,
+        experience_band: str,
+        profile: CandidateProfile | None,
+        evidence: list[HiringReportEvidence],
+    ) -> HiringReportNarrative:
+        profile_desc = (
+            f"years_exp={profile.years_exp}, domains={profile.domains}, "
+            f"tech_stack={profile.tech_stack}, seniority_estimate={profile.seniority_estimate}"
+            if profile is not None
+            else "no candidate profile available"
+        )
+        evidence_desc = "\n".join(
+            f"- {e.question}: verdict={e.verdict}, approach={e.approach}, "
+            f"complexity={e.complexity}, partial_score={e.partial_score}"
+            for e in evidence
+        )
+        prompt = (
+            f"Candidate for {experience_band} {target_role}.\nProfile: {profile_desc}\n\n"
+            f"Per-question evidence from the exam session:\n{evidence_desc}\n\n"
+            "Synthesize a hiring signal report. Every claim you make must be "
+            "grounded in the evidence above — cite specific questions when "
+            "you assert a strength or weakness. Respond with strict JSON "
+            "matching: seniority_match (string, e.g. \"SDE-2\"), "
+            "strong_areas (string list, topics/questions the candidate did "
+            "well on), weak_areas (string list), code_quality (string), "
+            "problem_solving (string, a short narrative), overall_score "
+            "(float 0.0-1.0), recommendation "
+            "(\"proceed\"|\"maybe\"|\"reject\")."
+        )
+        text = await self._call(prompt, model=self._DRAFT_MODEL)
+        return HiringReportNarrative.model_validate_json(text)
 
 
 def get_llm_client() -> LLMClient:

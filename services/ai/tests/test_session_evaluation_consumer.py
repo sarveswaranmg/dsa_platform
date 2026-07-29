@@ -2,7 +2,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from app.clients.exam_service import AssignedQuestion, SubmissionRecord
+from app.clients.exam_service import AssignedQuestion, SessionContext, SubmissionRecord
 from app.clients.question_service import QuestionCreated, TestCaseUpload, VersionContent
 from app.db.session import get_sessionmaker
 from app.llm.client import get_llm_client
@@ -49,6 +49,12 @@ class FakeExamServiceClient:
         self, *, org_id: uuid.UUID, session_id: uuid.UUID
     ) -> list[AssignedQuestion]:
         return self._questions[session_id]
+
+    async def get_session_context(self, **kwargs: Any) -> SessionContext:
+        raise NotImplementedError
+
+    async def attach_hiring_report(self, **kwargs: Any) -> None:
+        raise NotImplementedError
 
 
 def _content(version_id: uuid.UUID, question_id: uuid.UUID) -> VersionContent:

@@ -120,6 +120,42 @@ async def test_schedule_ai_creates_pending_generation_exam_with_two_slots(
     assert all(a == author["Authorization"] for a in fake_question_client.seen_authorizations)
 
 
+async def test_schedule_ai_persists_candidate_profile_id(
+    client: AsyncClient,
+    author: dict[str, str],
+    fake_question_client: FakeQuestionClient,
+    fake_ai_client: FakeAiServiceClient,
+    db_session: AsyncSession,
+    org_id: uuid.UUID,
+) -> None:
+    topic_a, topic_b = uuid.uuid4(), uuid.uuid4()
+    fake_question_client.topics = [
+        TopicRef(id=topic_a, name="Arrays"),
+        TopicRef(id=topic_b, name="Graphs"),
+    ]
+    fake_ai_client.set_blueprint_spec(_two_slot_spec(topic_a, topic_b))
+    profile_id = uuid.uuid4()
+
+    response = await client.post(
+        "/exams/schedule-ai",
+        headers=author,
+        json={
+            "candidate_email": CANDIDATE_EMAIL,
+            "candidate_profile_id": str(profile_id),
+            "target_role": "Backend Engineer",
+            "seniority_band": "senior",
+            "language_targets": ["python"],
+            **_window(),
+        },
+    )
+    assert response.status_code == 201, response.text
+    exam_id = uuid.UUID(response.json()["id"])
+
+    exam = await exams_repo.get_by_id(db_session, org_id=org_id, exam_id=exam_id)
+    assert exam is not None
+    assert exam.candidate_profile_id == profile_id
+
+
 async def test_get_exam_refreshes_to_pending_review_once_all_slots_ready(
     client: AsyncClient,
     author: dict[str, str],

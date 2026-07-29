@@ -17,7 +17,9 @@ from app.core.exceptions import NotFound
 from app.db.session import get_db
 from app.models.examiner import Role
 from app.repositories import exams as exams_repo
+from app.repositories import sessions as sessions_repo
 from app.repositories import submissions as submissions_repo
+from app.schemas.hiring_report import HiringReportResponse
 from app.schemas.results import SubmissionDetail, SubmissionSummary
 from app.schemas.submission import CaseVerdictResponse
 
@@ -29,6 +31,9 @@ DB = Annotated[AsyncSession, Depends(get_db)]
 ResultsCtx = Annotated[
     AuthContext, Depends(require_role(Role.ADMIN, Role.REVIEWER, Role.PROCTOR))
 ]
+# Hiring report is reviewer/admin only, per the slice spec — narrower than
+# ResultsCtx (a proctor monitors live sessions but doesn't make hiring calls).
+ReportCtx = Annotated[AuthContext, Depends(require_role(Role.ADMIN, Role.REVIEWER))]
 
 
 @router.get("/exams/{exam_id}/submissions", response_model=list[SubmissionSummary])
@@ -69,4 +74,21 @@ async def get_submission_detail(
         source=submission.source,
         created_at=submission.created_at,
         cases=[CaseVerdictResponse.model_validate(v) for v in verdicts],
+    )
+
+
+@router.get("/exams/{exam_id}/report", response_model=HiringReportResponse)
+async def get_hiring_report(
+    exam_id: uuid.UUID, ctx: ReportCtx, session: DB
+) -> HiringReportResponse:
+    exam_session = await sessions_repo.get_by_exam(session, org_id=ctx.org_id, exam_id=exam_id)
+    if (
+        exam_session is None
+        or exam_session.hiring_report_json is None
+        or exam_session.hiring_report_generated_at is None
+    ):
+        raise NotFound("Report not found")
+    return HiringReportResponse(
+        **exam_session.hiring_report_json,
+        generated_at=exam_session.hiring_report_generated_at,
     )

@@ -172,3 +172,23 @@ export interface SubmissionDetail extends SubmissionSummary {
   compile_error: string | null
   cases: CaseVerdict[]
 }
+
+export interface HiringReportEvidence {
+  question: string
+  verdict: Verdict | null
+  approach: string | null
+  complexity: string | null
+  partial_score: number
+}
+
+export interface HiringReport {
+  seniority_match: string
+  strong_areas: string[]
+  weak_areas: string[]
+  code_quality: string
+  problem_solving: string
+  overall_score: number
+  recommendation: 'proceed' | 'maybe' | 'reject'
+  evidence: HiringReportEvidence[]
+  generated_at: string
+}

@@ -53,3 +53,7 @@ class Exam(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # here (once per exam, shared by every slot) so a later slot
     # regeneration can re-call ai's generate_question with the same targets.
     language_targets: Mapped[list[str] | None] = mapped_column(ARRAY(String))
+    # Mode 2 only (Phase 2 Slice 8) — the ai-service profile id that drove
+    # this exam's blueprint proposal, kept for the hiring report's seniority
+    # match. NULL for Mode 1 (manual) exams.
+    candidate_profile_id: Mapped[uuid.UUID | None] = mapped_column()
